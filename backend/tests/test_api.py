@@ -457,3 +457,38 @@ def test_experiment_comparison_reports_group_growth_statistics(tmp_path: Path):
     assert groups["treatment"]["mean_growth_rate_percent"] == 50
     assert groups["control"]["sample_size"] == 1
     assert "not evidence of causality" in comparison["interpretation_note"]
+
+
+def test_capture_profile_is_created_and_updated_per_tray(tmp_path: Path):
+    main.repository = Repository(tmp_path / "profile.db")
+    with TestClient(main.app) as client:
+        client.post(
+            "/api/v1/trays",
+            json={"code": "TRAY-P", "crop": "pepper", "rows": 2, "columns": 2},
+        )
+        first = client.put(
+            "/api/v1/trays/TRAY-P/capture-profile",
+            json={
+                "pixels_per_cm": 42.5,
+                "margin_ratio": 0.1,
+                "rectify": True,
+                "minimum_tray_area_ratio": 0.3,
+                "maximum_sensor_age_minutes": 20,
+                "updated_by": "student-team",
+                "updated_at": "2026-08-24T09:00:00+09:00",
+            },
+        )
+        second = client.put(
+            "/api/v1/trays/TRAY-P/capture-profile",
+            json={
+                **first.json(),
+                "pixels_per_cm": 43,
+                "updated_at": "2026-08-24T10:00:00+09:00",
+            },
+        )
+        profile = client.get("/api/v1/trays/TRAY-P/capture-profile")
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert profile.json()["pixels_per_cm"] == 43
+    assert profile.json()["rectify"] is True

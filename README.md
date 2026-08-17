@@ -92,6 +92,11 @@ mean, median, population standard deviation, minimum, and maximum. These are
 descriptive statistics; the dashboard explicitly avoids claiming significance
 or causality.
 
+Each tray can store a fixed-camera capture profile containing scale calibration,
+cell margin, perspective-rectification settings, and the allowed sensor matching
+window. Profile changes retain an operator and timezone-aware update timestamp
+so measurement configuration remains auditable.
+
 Run tests:
 
 ```bash

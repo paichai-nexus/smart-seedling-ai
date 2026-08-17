@@ -328,3 +328,24 @@ class ExperimentComparisonRead(BaseModel):
     experiment_name: str
     groups: list[GroupGrowthSummaryRead]
     interpretation_note: str
+
+
+class CaptureProfileUpsert(BaseModel):
+    pixels_per_cm: float = Field(gt=0)
+    margin_ratio: float = Field(default=0.08, ge=0, lt=0.4)
+    rectify: bool = False
+    minimum_tray_area_ratio: float = Field(default=0.25, gt=0, lt=1)
+    maximum_sensor_age_minutes: float = Field(default=30, ge=0, le=1440)
+    updated_by: str = Field(min_length=1, max_length=100)
+    updated_at: datetime
+
+    @field_validator("updated_at")
+    @classmethod
+    def updated_at_requires_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("updated_at must include a timezone offset")
+        return value
+
+
+class CaptureProfileRead(CaptureProfileUpsert):
+    tray_code: str

@@ -19,6 +19,8 @@ from .experiments import summarize_group_growth
 from .recommendations import derive_observable_signals, rank_knowledge_rules
 from .repository import Repository
 from .schemas import (
+    CaptureProfileRead,
+    CaptureProfileUpsert,
     CaptureQualityRead,
     DashboardSummary,
     ExperimentComparisonRead,
@@ -111,6 +113,63 @@ def create_tray(payload: TrayCreate) -> dict[str, str]:
         except Exception as exc:
             raise HTTPException(status_code=409, detail="Tray already exists") from exc
     return {"code": payload.code.upper()}
+
+
+@app.put(
+    "/api/v1/trays/{tray_code}/capture-profile",
+    response_model=CaptureProfileRead,
+)
+def upsert_capture_profile(
+    tray_code: str,
+    payload: CaptureProfileUpsert,
+) -> CaptureProfileRead:
+    tray_code = tray_code.upper()
+    with repository.connect() as connection:
+        tray = connection.execute("SELECT 1 FROM trays WHERE code = ?", (tray_code,)).fetchone()
+        if tray is None:
+            raise HTTPException(status_code=404, detail="Tray not found")
+        connection.execute(
+            """INSERT INTO capture_profiles(
+                   tray_code, pixels_per_cm, margin_ratio, rectify,
+                   minimum_tray_area_ratio, maximum_sensor_age_minutes,
+                   updated_by, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(tray_code) DO UPDATE SET
+                   pixels_per_cm = excluded.pixels_per_cm,
+                   margin_ratio = excluded.margin_ratio,
+                   rectify = excluded.rectify,
+                   minimum_tray_area_ratio = excluded.minimum_tray_area_ratio,
+                   maximum_sensor_age_minutes = excluded.maximum_sensor_age_minutes,
+                   updated_by = excluded.updated_by,
+                   updated_at = excluded.updated_at""",
+            (
+                tray_code,
+                payload.pixels_per_cm,
+                payload.margin_ratio,
+                int(payload.rectify),
+                payload.minimum_tray_area_ratio,
+                payload.maximum_sensor_age_minutes,
+                payload.updated_by,
+                payload.updated_at.isoformat(),
+            ),
+        )
+    return CaptureProfileRead(tray_code=tray_code, **payload.model_dump())
+
+
+@app.get(
+    "/api/v1/trays/{tray_code}/capture-profile",
+    response_model=CaptureProfileRead,
+)
+def get_capture_profile(tray_code: str) -> CaptureProfileRead:
+    with repository.connect() as connection:
+        row = connection.execute(
+            "SELECT * FROM capture_profiles WHERE tray_code = ?", (tray_code.upper(),)
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Capture profile not found")
+    values = dict(row)
+    values["rectify"] = bool(values["rectify"])
+    return CaptureProfileRead(**values)
 
 
 @app.post("/api/v1/observations", response_model=ObservationRead, status_code=201)

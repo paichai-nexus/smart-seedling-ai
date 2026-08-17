@@ -134,6 +134,18 @@ CREATE TABLE IF NOT EXISTS experiment_trays (
     assigned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(experiment_id, tray_code)
 );
+CREATE TABLE IF NOT EXISTS capture_profiles (
+    tray_code TEXT PRIMARY KEY REFERENCES trays(code),
+    pixels_per_cm REAL NOT NULL CHECK(pixels_per_cm > 0),
+    margin_ratio REAL NOT NULL CHECK(margin_ratio >= 0 AND margin_ratio < 0.4),
+    rectify INTEGER NOT NULL CHECK(rectify IN (0, 1)),
+    minimum_tray_area_ratio REAL NOT NULL
+        CHECK(minimum_tray_area_ratio > 0 AND minimum_tray_area_ratio < 1),
+    maximum_sensor_age_minutes REAL NOT NULL
+        CHECK(maximum_sensor_age_minutes >= 0 AND maximum_sensor_age_minutes <= 1440),
+    updated_by TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
