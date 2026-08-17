@@ -105,6 +105,7 @@ class SensorContextRead(BaseModel):
     reading_id: int
     measured_at: datetime
     source: str
+    sensor_id: Optional[str] = None
     time_delta_seconds: float
     temperature_c: Optional[float]
     pressure_hpa: Optional[float] = None
@@ -143,6 +144,7 @@ class TrayAnalysisRead(BaseModel):
 class SensorReadingCreate(BaseModel):
     measured_at: datetime
     source: str = Field(default="manual", min_length=1, max_length=80)
+    sensor_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
     temperature_c: Optional[float] = Field(default=None, ge=-40, le=85)
     pressure_hpa: Optional[float] = Field(default=None, ge=300, le=1200)
     humidity_percent: Optional[float] = Field(default=None, ge=0, le=100)

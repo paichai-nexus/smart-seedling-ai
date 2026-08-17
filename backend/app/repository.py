@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS sensor_readings (
     tray_code TEXT NOT NULL REFERENCES trays(code),
     measured_at TEXT NOT NULL,
     source TEXT NOT NULL,
+    sensor_id TEXT,
     temperature_c REAL,
     pressure_hpa REAL CHECK(pressure_hpa >= 0),
     humidity_percent REAL CHECK(humidity_percent BETWEEN 0 AND 100),
@@ -188,6 +189,7 @@ class Repository:
     def _migrate_sensor_readings(connection: sqlite3.Connection) -> None:
         existing = {row["name"] for row in connection.execute("PRAGMA table_info(sensor_readings)")}
         additions = {
+            "sensor_id": "TEXT",
             "pressure_hpa": "REAL CHECK(pressure_hpa >= 0)",
             "soil_moisture_raw_adc": ("INTEGER CHECK(soil_moisture_raw_adc BETWEEN 0 AND 32767)"),
             "soil_moisture_voltage_v": ("REAL CHECK(soil_moisture_voltage_v BETWEEN 0 AND 6.144)"),

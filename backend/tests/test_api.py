@@ -195,6 +195,45 @@ def test_sensor_readings_are_validated_and_returned_latest_first(tmp_path: Path)
     assert readings[0]["soil_moisture_voltage_v"] == 1.82
 
 
+def test_soil_calibration_derives_relative_moisture_from_raw_adc(tmp_path: Path):
+    main.repository = Repository(tmp_path / "soil-calibration.db")
+    with TestClient(main.app) as client:
+        client.post(
+            "/api/v1/trays",
+            json={"code": "TRAY-SC", "crop": "pepper", "rows": 1, "columns": 1},
+        )
+        calibration = client.post(
+            "/api/v1/trays/TRAY-SC/soil-calibrations",
+            json={
+                "source": "edge-01",
+                "sensor_id": "sen0193-a",
+                "dry_adc": 22000,
+                "wet_adc": 12000,
+                "calibrated_at": "2026-08-20T08:00:00+09:00",
+                "calibrated_by": "Sensor Team",
+                "method_notes": "Air-dry and fully wetted substrate references.",
+            },
+        )
+        reading = client.post(
+            "/api/v1/trays/TRAY-SC/sensor-readings",
+            json={
+                "measured_at": "2026-08-20T09:00:00+09:00",
+                "source": "edge-01",
+                "sensor_id": "sen0193-a",
+                "soil_moisture_raw_adc": 17000,
+                "soil_moisture_voltage_v": 2.12,
+            },
+        )
+        active = client.get("/api/v1/trays/TRAY-SC/soil-calibrations").json()
+
+    assert calibration.status_code == 201, calibration.text
+    assert reading.status_code == 201, reading.text
+    assert reading.json()["soil_moisture_percent"] == 50
+    assert reading.json()["soil_calibration_id"] == calibration.json()["id"]
+    assert reading.json()["soil_moisture_out_of_range"] is False
+    assert len(active) == 1
+
+
 def test_tray_capture_links_nearest_sensor_context(tmp_path: Path):
     main.repository = Repository(tmp_path / "multimodal.db")
     main.UPLOAD_ROOT = tmp_path / "uploads"
