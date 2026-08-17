@@ -22,12 +22,60 @@ class TrayCell:
     image: np.ndarray
 
 
+@dataclass(frozen=True)
+class CaptureQuality:
+    accepted: bool
+    blur_score: float
+    mean_brightness: float
+    dark_pixel_ratio: float
+    bright_pixel_ratio: float
+    reasons: tuple[str, ...]
+
+
 def decode_image(content: bytes) -> np.ndarray:
     encoded = np.frombuffer(content, dtype=np.uint8)
     image = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError("The uploaded file is not a decodable image")
     return image
+
+
+def assess_capture_quality(
+    image: np.ndarray,
+    minimum_blur_score: float = 40.0,
+    minimum_brightness: float = 35.0,
+    maximum_brightness: float = 220.0,
+    maximum_clipped_ratio: float = 0.35,
+) -> CaptureQuality:
+    """Evaluate whether a fixed-camera image is usable for measurement."""
+    if image.ndim != 3 or image.shape[2] != 3:
+        raise ValueError("A three-channel BGR image is required")
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blur_score = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    mean_brightness = float(gray.mean())
+    dark_ratio = float(np.mean(gray <= 5))
+    bright_ratio = float(np.mean(gray >= 250))
+
+    reasons = []
+    if blur_score < minimum_blur_score:
+        reasons.append("image_too_blurry")
+    if mean_brightness < minimum_brightness:
+        reasons.append("image_too_dark")
+    if mean_brightness > maximum_brightness:
+        reasons.append("image_too_bright")
+    if dark_ratio > maximum_clipped_ratio:
+        reasons.append("excessive_black_clipping")
+    if bright_ratio > maximum_clipped_ratio:
+        reasons.append("excessive_white_clipping")
+
+    return CaptureQuality(
+        accepted=not reasons,
+        blur_score=round(blur_score, 2),
+        mean_brightness=round(mean_brightness, 2),
+        dark_pixel_ratio=round(dark_ratio, 4),
+        bright_pixel_ratio=round(bright_ratio, 4),
+        reasons=tuple(reasons),
+    )
 
 
 def analyze_green_leaf_area(image: np.ndarray, pixels_per_cm: float) -> LeafAnalysis:

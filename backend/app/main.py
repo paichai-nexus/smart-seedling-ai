@@ -14,6 +14,7 @@ from typing_extensions import Annotated
 from .domain import ObservationMetrics, classify_status, growth_rate_percent, stable_seedling_id
 from .repository import Repository
 from .schemas import (
+    CaptureQualityRead,
     DashboardSummary,
     ImageAnalysisRead,
     ObservationCreate,
@@ -24,12 +25,23 @@ from .schemas import (
     TrayCellAnalysis,
     TrayCreate,
 )
-from .vision import analyze_green_leaf_area, decode_image, split_tray_grid
+from .vision import analyze_green_leaf_area, assess_capture_quality, decode_image, split_tray_grid
 
 ROOT = Path(__file__).resolve().parents[2]
 repository = Repository(os.getenv("SMART_SEEDLING_DB", str(ROOT / "smart_seedling.db")))
 UPLOAD_ROOT = Path(os.getenv("SMART_SEEDLING_UPLOADS", str(ROOT / "uploads")))
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
+
+def quality_response(quality) -> CaptureQualityRead:
+    return CaptureQualityRead(
+        accepted=quality.accepted,
+        blur_score=quality.blur_score,
+        mean_brightness=quality.mean_brightness,
+        dark_pixel_ratio=quality.dark_pixel_ratio,
+        bright_pixel_ratio=quality.bright_pixel_ratio,
+        reasons=list(quality.reasons),
+    )
 
 
 @asynccontextmanager
@@ -149,7 +161,19 @@ async def analyze_image(
     if len(content) > MAX_IMAGE_BYTES:
         raise HTTPException(status_code=413, detail="Image exceeds the 10 MB limit")
     try:
-        analysis = analyze_green_leaf_area(decode_image(content), pixels_per_cm)
+        decoded = decode_image(content)
+        quality = assess_capture_quality(decoded)
+        if not quality.accepted:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "Capture quality gate failed",
+                    "quality": quality_response(quality).model_dump(),
+                },
+            )
+        analysis = analyze_green_leaf_area(decoded, pixels_per_cm)
+    except HTTPException:
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -183,6 +207,7 @@ async def analyze_image(
         coverage_ratio=analysis.coverage_ratio,
         analysis_confidence=analysis.confidence,
         status=observation.status,
+        quality=quality_response(quality),
     )
 
 
@@ -213,7 +238,18 @@ async def analyze_tray_image(
 
     try:
         decoded = decode_image(content)
+        quality = assess_capture_quality(decoded)
+        if not quality.accepted:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "Capture quality gate failed",
+                    "quality": quality_response(quality).model_dump(),
+                },
+            )
         cells = split_tray_grid(decoded, tray["rows"], tray["columns"], margin_ratio)
+    except HTTPException:
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -266,6 +302,7 @@ async def analyze_tray_image(
         tray_code=tray_code,
         captured_at=captured_at,
         image_path=relative_path,
+        quality=quality_response(quality),
         cells=[
             TrayCellAnalysis(
                 row=observation.row,

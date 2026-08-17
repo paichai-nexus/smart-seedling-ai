@@ -45,7 +45,9 @@ def test_seedling_history_is_chronological_and_calculates_growth(tmp_path: Path)
 def test_full_tray_image_creates_one_observation_per_cell(tmp_path: Path):
     main.repository = Repository(tmp_path / "tray.db")
     main.UPLOAD_ROOT = tmp_path / "uploads"
-    image = np.zeros((100, 100, 3), dtype=np.uint8)
+    image = np.full((100, 100, 3), 80, dtype=np.uint8)
+    image[::10, :] = 120
+    image[:, ::10] = 120
     for y, x in [(10, 10), (10, 60), (60, 10), (60, 60)]:
         image[y : y + 25, x : x + 25] = (0, 180, 0)
     success, encoded = cv2.imencode(".png", image)
@@ -79,3 +81,34 @@ def test_full_tray_image_creates_one_observation_per_cell(tmp_path: Path):
         "TRAY-G-R02C02",
     }
     assert (main.UPLOAD_ROOT / body["image_path"]).exists()
+
+
+def test_quality_gate_rejects_bad_capture_before_persistence(tmp_path: Path):
+    main.repository = Repository(tmp_path / "quality.db")
+    main.UPLOAD_ROOT = tmp_path / "uploads"
+    image = np.zeros((100, 100, 3), dtype=np.uint8)
+    success, encoded = cv2.imencode(".png", image)
+    assert success
+
+    with TestClient(main.app) as client:
+        assert (
+            client.post(
+                "/api/v1/trays",
+                json={"code": "TRAY-Q", "crop": "tomato", "rows": 1, "columns": 1},
+            ).status_code
+            == 201
+        )
+        response = client.post(
+            "/api/v1/trays/TRAY-Q/images/analyze",
+            files={"image": ("dark.png", encoded.tobytes(), "image/png")},
+            data={
+                "captured_at": "2026-08-18T09:00:00+09:00",
+                "pixels_per_cm": "10",
+            },
+        )
+        seedlings = client.get("/api/v1/seedlings").json()
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["message"] == "Capture quality gate failed"
+    assert "image_too_dark" in response.json()["detail"]["quality"]["reasons"]
+    assert seedlings == []

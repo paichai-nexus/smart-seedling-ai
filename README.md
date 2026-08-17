@@ -44,6 +44,11 @@ every cell in row-major order, and persists one time-series observation per
 seedling. This fixed-grid method assumes the tray boundary is aligned with the
 image; perspective rectification is the next capture-quality milestone.
 
+Every image passes a capture-quality gate before persistence. The gate reports
+blur score, mean brightness, and black/white clipping ratios. Rejected captures
+return actionable reason codes such as `image_too_blurry` or `image_too_dark`
+and do not create research observations.
+
 Run tests:
 
 ```bash

@@ -44,6 +44,15 @@ class DashboardSummary(BaseModel):
     latest_capture_at: Optional[datetime]
 
 
+class CaptureQualityRead(BaseModel):
+    accepted: bool
+    blur_score: float
+    mean_brightness: float
+    dark_pixel_ratio: float
+    bright_pixel_ratio: float
+    reasons: list[str]
+
+
 class ImageAnalysisRead(BaseModel):
     seedling_id: str
     observation_id: int
@@ -53,6 +62,7 @@ class ImageAnalysisRead(BaseModel):
     coverage_ratio: float
     analysis_confidence: float
     status: HealthStatus
+    quality: CaptureQualityRead
 
 
 class SeedlingLatest(BaseModel):
@@ -91,3 +101,4 @@ class TrayAnalysisRead(BaseModel):
     captured_at: datetime
     image_path: str
     cells: list[TrayCellAnalysis]
+    quality: CaptureQualityRead

@@ -2,7 +2,12 @@ import unittest
 
 import cv2
 import numpy as np
-from app.vision import analyze_green_leaf_area, decode_image, split_tray_grid
+from app.vision import (
+    analyze_green_leaf_area,
+    assess_capture_quality,
+    decode_image,
+    split_tray_grid,
+)
 
 
 class VisionTests(unittest.TestCase):
@@ -25,6 +30,23 @@ class VisionTests(unittest.TestCase):
     def test_invalid_bytes_are_rejected(self):
         with self.assertRaises(ValueError):
             decode_image(b"not an image")
+
+    def test_sharp_balanced_capture_passes_quality_gate(self):
+        image = np.full((100, 100, 3), 90, dtype=np.uint8)
+        image[::10, :] = 120
+        image[:, ::10] = 120
+        image[20:80, 30:70] = (0, 180, 0)
+        quality = assess_capture_quality(image)
+        self.assertTrue(quality.accepted)
+        self.assertEqual(quality.reasons, ())
+
+    def test_dark_uniform_capture_reports_actionable_reasons(self):
+        image = np.zeros((100, 100, 3), dtype=np.uint8)
+        quality = assess_capture_quality(image)
+        self.assertFalse(quality.accepted)
+        self.assertIn("image_too_blurry", quality.reasons)
+        self.assertIn("image_too_dark", quality.reasons)
+        self.assertIn("excessive_black_clipping", quality.reasons)
 
     def test_tray_grid_uses_one_based_row_major_cells(self):
         image = np.zeros((100, 200, 3), dtype=np.uint8)
