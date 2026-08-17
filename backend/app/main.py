@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 import os
 from contextlib import asynccontextmanager
@@ -9,7 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from typing_extensions import Annotated
 
 from .domain import ObservationMetrics, classify_status, growth_rate_percent, stable_seedling_id
@@ -18,6 +20,9 @@ from .repository import Repository
 from .schemas import (
     CaptureQualityRead,
     DashboardSummary,
+    ExperimentCreate,
+    ExperimentGroupRead,
+    ExperimentRead,
     ExpertReviewCreate,
     ExpertReviewRead,
     ImageAnalysisRead,
@@ -737,4 +742,150 @@ def observation_recommendations(observation_id: int) -> ObservationRecommendatio
             "These are expert-approved decision-support rules, not a diagnosis. "
             "Verify required checks before changing irrigation, fertilizer, or pesticide use."
         ),
+    )
+
+
+@app.post("/api/v1/experiments", response_model=ExperimentRead, status_code=201)
+def create_experiment(payload: ExperimentCreate) -> ExperimentRead:
+    tray_codes = [code.upper() for group in payload.groups for code in group.tray_codes]
+    with repository.connect() as connection:
+        placeholders = ",".join("?" for _ in tray_codes)
+        existing = {
+            row["code"]
+            for row in connection.execute(
+                f"SELECT code FROM trays WHERE code IN ({placeholders})", tray_codes
+            ).fetchall()
+        }
+        missing = sorted(set(tray_codes) - existing)
+        if missing:
+            raise HTTPException(status_code=422, detail={"missing_trays": missing})
+
+        cursor = connection.execute(
+            """INSERT INTO experiments(
+                   name, crop, hypothesis, started_at, ended_at, created_by
+               ) VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                payload.name,
+                payload.crop,
+                payload.hypothesis,
+                payload.started_at.isoformat(),
+                payload.ended_at.isoformat() if payload.ended_at else None,
+                payload.created_by,
+            ),
+        )
+        experiment_id = cursor.lastrowid
+        groups = []
+        for group in payload.groups:
+            group_cursor = connection.execute(
+                """INSERT INTO experiment_groups(experiment_id, name, kind, description)
+                   VALUES (?, ?, ?, ?)""",
+                (experiment_id, group.name, group.kind.value, group.description),
+            )
+            group_id = group_cursor.lastrowid
+            normalized_trays = [code.upper() for code in group.tray_codes]
+            connection.executemany(
+                """INSERT INTO experiment_trays(experiment_id, group_id, tray_code)
+                   VALUES (?, ?, ?)""",
+                [(experiment_id, group_id, code) for code in normalized_trays],
+            )
+            groups.append(
+                ExperimentGroupRead(
+                    id=group_id,
+                    name=group.name,
+                    kind=group.kind,
+                    description=group.description,
+                    tray_codes=normalized_trays,
+                )
+            )
+    return ExperimentRead(
+        id=experiment_id,
+        name=payload.name,
+        crop=payload.crop,
+        hypothesis=payload.hypothesis,
+        started_at=payload.started_at,
+        ended_at=payload.ended_at,
+        created_by=payload.created_by,
+        groups=groups,
+    )
+
+
+EXPERIMENT_EXPORT_FIELDS = [
+    "experiment_id",
+    "experiment_name",
+    "group_name",
+    "group_kind",
+    "tray_code",
+    "seedling_id",
+    "captured_at",
+    "leaf_area_cm2",
+    "discoloration_ratio",
+    "damage_ratio",
+    "ai_status",
+    "temperature_c",
+    "humidity_percent",
+    "soil_moisture_percent",
+    "illuminance_lux",
+    "ec_ms_cm",
+    "ph",
+    "sensor_time_delta_seconds",
+    "expert_assessment",
+]
+
+
+@app.get("/api/v1/experiments/{experiment_id}/export.csv")
+def export_experiment_csv(experiment_id: int) -> StreamingResponse:
+    query = """
+    SELECT e.id AS experiment_id, e.name AS experiment_name, e.started_at, e.ended_at,
+           g.name AS group_name, g.kind AS group_kind, et.tray_code,
+           o.seedling_id, o.captured_at, o.leaf_area_cm2, o.discoloration_ratio,
+           o.damage_ratio, o.status AS ai_status,
+           sr.temperature_c, sr.humidity_percent, sr.soil_moisture_percent,
+           sr.illuminance_lux, sr.ec_ms_cm, sr.ph, csl.time_delta_seconds,
+           er.assessment AS expert_assessment
+    FROM experiments e
+    JOIN experiment_groups g ON g.experiment_id = e.id
+    JOIN experiment_trays et ON et.group_id = g.id AND et.experiment_id = e.id
+    JOIN observations o ON o.tray_code = et.tray_code
+    LEFT JOIN capture_observations co ON co.observation_id = o.id
+    LEFT JOIN capture_sensor_links csl ON csl.capture_id = co.capture_id
+    LEFT JOIN sensor_readings sr ON sr.id = csl.sensor_reading_id
+    LEFT JOIN expert_reviews er ON er.id = (
+        SELECT id FROM expert_reviews WHERE observation_id = o.id
+        ORDER BY reviewed_at DESC LIMIT 1
+    )
+    WHERE e.id = ?
+    ORDER BY g.kind, g.name, o.seedling_id, o.captured_at
+    """
+    with repository.connect() as connection:
+        rows = connection.execute(query, (experiment_id,)).fetchall()
+        experiment = connection.execute(
+            "SELECT started_at, ended_at FROM experiments WHERE id = ?", (experiment_id,)
+        ).fetchone()
+    if experiment is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+
+    started_at = datetime.fromisoformat(experiment["started_at"])
+    ended_at = datetime.fromisoformat(experiment["ended_at"]) if experiment["ended_at"] else None
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=EXPERIMENT_EXPORT_FIELDS)
+    writer.writeheader()
+    for row in rows:
+        observed_at = datetime.fromisoformat(row["captured_at"])
+        if observed_at < started_at or (ended_at is not None and observed_at > ended_at):
+            continue
+        writer.writerow(
+            {
+                field: (
+                    row[field]
+                    if field != "sensor_time_delta_seconds"
+                    else row["time_delta_seconds"]
+                )
+                for field in EXPERIMENT_EXPORT_FIELDS
+            }
+        )
+    filename = f"experiment-{experiment_id}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

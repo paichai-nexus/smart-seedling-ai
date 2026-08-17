@@ -350,3 +350,57 @@ def test_recommendations_use_only_approved_matching_rules(tmp_path: Path):
     assert body["rules"][0]["rule_id"] == approved["id"]
     assert body["rules"][0]["matched_signals"] == ["discoloration"]
     assert "not a diagnosis" in body["disclaimer"]
+
+
+def test_controlled_experiment_exports_grouped_observations(tmp_path: Path):
+    main.repository = Repository(tmp_path / "experiment.db")
+    with TestClient(main.app) as client:
+        for code in ("TRAY-C", "TRAY-T"):
+            client.post(
+                "/api/v1/trays",
+                json={"code": code, "crop": "tomato", "rows": 1, "columns": 1},
+            )
+            client.post(
+                "/api/v1/observations",
+                json={
+                    "tray_code": code,
+                    "row": 1,
+                    "column": 1,
+                    "captured_at": "2026-08-23T09:00:00+09:00",
+                    "leaf_area_cm2": 12 if code == "TRAY-C" else 14,
+                },
+            )
+        experiment = client.post(
+            "/api/v1/experiments",
+            json={
+                "name": "Irrigation pilot",
+                "crop": "tomato",
+                "hypothesis": "Adjusted irrigation changes projected leaf area.",
+                "started_at": "2026-08-22T00:00:00+09:00",
+                "ended_at": "2026-08-30T00:00:00+09:00",
+                "created_by": "student-team",
+                "groups": [
+                    {
+                        "name": "standard irrigation",
+                        "kind": "control",
+                        "description": "Existing protocol",
+                        "tray_codes": ["TRAY-C"],
+                    },
+                    {
+                        "name": "adjusted irrigation",
+                        "kind": "treatment",
+                        "description": "Expert-defined treatment",
+                        "tray_codes": ["TRAY-T"],
+                    },
+                ],
+            },
+        )
+        export = client.get(f"/api/v1/experiments/{experiment.json()['id']}/export.csv")
+
+    assert experiment.status_code == 201, experiment.text
+    assert export.status_code == 200
+    lines = export.text.strip().splitlines()
+    assert len(lines) == 3
+    assert "group_kind" in lines[0]
+    assert any("control" in line and "TRAY-C" in line for line in lines[1:])
+    assert any("treatment" in line and "TRAY-T" in line for line in lines[1:])

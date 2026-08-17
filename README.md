@@ -80,6 +80,12 @@ ratios and growth change into auditable signals, currently `discoloration`,
 approved rules by signal coverage and returns possible causes, required checks,
 safe actions, approval provenance, and an explicit non-diagnostic disclaimer.
 
+Controlled experiments contain at least one control and one treatment group,
+with each tray assigned to only one group per experiment. The experiment CSV
+export produces one row per seedling observation and includes group identity,
+Vision metrics, linked sensor context, and the latest expert assessment. Records
+outside the declared experiment period are excluded using timezone-aware times.
+
 Run tests:
 
 ```bash
