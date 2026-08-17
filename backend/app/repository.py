@@ -54,6 +54,27 @@ CREATE TABLE IF NOT EXISTS capture_observations (
     observation_id INTEGER NOT NULL REFERENCES observations(id),
     PRIMARY KEY(capture_id, observation_id)
 );
+CREATE TABLE IF NOT EXISTS sensor_readings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tray_code TEXT NOT NULL REFERENCES trays(code),
+    measured_at TEXT NOT NULL,
+    source TEXT NOT NULL,
+    temperature_c REAL,
+    humidity_percent REAL CHECK(humidity_percent BETWEEN 0 AND 100),
+    soil_moisture_percent REAL CHECK(soil_moisture_percent BETWEEN 0 AND 100),
+    illuminance_lux REAL CHECK(illuminance_lux >= 0),
+    ec_ms_cm REAL CHECK(ec_ms_cm >= 0),
+    ph REAL CHECK(ph BETWEEN 0 AND 14),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(tray_code, measured_at, source),
+    CHECK(
+        temperature_c IS NOT NULL OR humidity_percent IS NOT NULL OR
+        soil_moisture_percent IS NOT NULL OR illuminance_lux IS NOT NULL OR
+        ec_ms_cm IS NOT NULL OR ph IS NOT NULL
+    )
+);
+CREATE INDEX IF NOT EXISTS sensor_readings_tray_time
+ON sensor_readings(tray_code, measured_at DESC);
 """
 
 

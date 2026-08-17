@@ -109,3 +109,32 @@ class TrayAnalysisRead(BaseModel):
     cells: list[TrayCellAnalysis]
     quality: CaptureQualityRead
     rectification: TrayRectificationRead
+
+
+class SensorReadingCreate(BaseModel):
+    measured_at: datetime
+    source: str = Field(default="manual", min_length=1, max_length=80)
+    temperature_c: Optional[float] = Field(default=None, ge=-40, le=85)
+    humidity_percent: Optional[float] = Field(default=None, ge=0, le=100)
+    soil_moisture_percent: Optional[float] = Field(default=None, ge=0, le=100)
+    illuminance_lux: Optional[float] = Field(default=None, ge=0)
+    ec_ms_cm: Optional[float] = Field(default=None, ge=0, le=20)
+    ph: Optional[float] = Field(default=None, ge=0, le=14)
+
+    def has_measurement(self) -> bool:
+        return any(
+            value is not None
+            for value in (
+                self.temperature_c,
+                self.humidity_percent,
+                self.soil_moisture_percent,
+                self.illuminance_lux,
+                self.ec_ms_cm,
+                self.ph,
+            )
+        )
+
+
+class SensorReadingRead(SensorReadingCreate):
+    id: int
+    tray_code: str
