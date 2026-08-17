@@ -404,3 +404,56 @@ def test_controlled_experiment_exports_grouped_observations(tmp_path: Path):
     assert "group_kind" in lines[0]
     assert any("control" in line and "TRAY-C" in line for line in lines[1:])
     assert any("treatment" in line and "TRAY-T" in line for line in lines[1:])
+
+
+def test_experiment_comparison_reports_group_growth_statistics(tmp_path: Path):
+    main.repository = Repository(tmp_path / "comparison.db")
+    with TestClient(main.app) as client:
+        for code, areas in (("CONTROL", (10, 12)), ("TREATMENT", (10, 15))):
+            client.post(
+                "/api/v1/trays",
+                json={"code": code, "crop": "tomato", "rows": 1, "columns": 1},
+            )
+            for day, area in enumerate(areas, start=1):
+                client.post(
+                    "/api/v1/observations",
+                    json={
+                        "tray_code": code,
+                        "row": 1,
+                        "column": 1,
+                        "captured_at": f"2026-08-{day:02d}T09:00:00+09:00",
+                        "leaf_area_cm2": area,
+                    },
+                )
+        experiment = client.post(
+            "/api/v1/experiments",
+            json={
+                "name": "Growth comparison",
+                "crop": "tomato",
+                "hypothesis": "Treatment changes projected leaf-area growth.",
+                "started_at": "2026-08-01T00:00:00+09:00",
+                "ended_at": "2026-08-03T00:00:00+09:00",
+                "created_by": "student-team",
+                "groups": [
+                    {
+                        "name": "Control",
+                        "kind": "control",
+                        "description": "Standard protocol",
+                        "tray_codes": ["CONTROL"],
+                    },
+                    {
+                        "name": "Treatment",
+                        "kind": "treatment",
+                        "description": "Candidate protocol",
+                        "tray_codes": ["TREATMENT"],
+                    },
+                ],
+            },
+        ).json()
+        comparison = client.get(f"/api/v1/experiments/{experiment['id']}/comparison").json()
+
+    groups = {group["group_kind"]: group for group in comparison["groups"]}
+    assert groups["control"]["mean_growth_rate_percent"] == 20
+    assert groups["treatment"]["mean_growth_rate_percent"] == 50
+    assert groups["control"]["sample_size"] == 1
+    assert "not evidence of causality" in comparison["interpretation_note"]

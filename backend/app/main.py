@@ -15,16 +15,21 @@ from fastapi.responses import FileResponse, StreamingResponse
 from typing_extensions import Annotated
 
 from .domain import ObservationMetrics, classify_status, growth_rate_percent, stable_seedling_id
+from .experiments import summarize_group_growth
 from .recommendations import derive_observable_signals, rank_knowledge_rules
 from .repository import Repository
 from .schemas import (
     CaptureQualityRead,
     DashboardSummary,
+    ExperimentComparisonRead,
     ExperimentCreate,
     ExperimentGroupRead,
+    ExperimentListItem,
     ExperimentRead,
     ExpertReviewCreate,
     ExpertReviewRead,
+    GroupGrowthSummaryRead,
+    GrowthSampleRead,
     ImageAnalysisRead,
     KnowledgeRuleApproval,
     KnowledgeRuleCreate,
@@ -806,6 +811,84 @@ def create_experiment(payload: ExperimentCreate) -> ExperimentRead:
         ended_at=payload.ended_at,
         created_by=payload.created_by,
         groups=groups,
+    )
+
+
+@app.get("/api/v1/experiments", response_model=list[ExperimentListItem])
+def list_experiments() -> list[ExperimentListItem]:
+    with repository.connect() as connection:
+        rows = connection.execute(
+            """SELECT id, name, crop, started_at, ended_at
+               FROM experiments ORDER BY started_at DESC, id DESC"""
+        ).fetchall()
+    return [ExperimentListItem(**dict(row)) for row in rows]
+
+
+@app.get(
+    "/api/v1/experiments/{experiment_id}/comparison",
+    response_model=ExperimentComparisonRead,
+)
+def compare_experiment(experiment_id: int) -> ExperimentComparisonRead:
+    with repository.connect() as connection:
+        experiment = connection.execute(
+            "SELECT id, name, started_at, ended_at FROM experiments WHERE id = ?",
+            (experiment_id,),
+        ).fetchone()
+        if experiment is None:
+            raise HTTPException(status_code=404, detail="Experiment not found")
+        groups = connection.execute(
+            """SELECT id, name, kind FROM experiment_groups
+               WHERE experiment_id = ? ORDER BY kind, id""",
+            (experiment_id,),
+        ).fetchall()
+        observation_rows = connection.execute(
+            """SELECT et.group_id, o.seedling_id, o.captured_at, o.leaf_area_cm2
+               FROM experiment_trays et
+               JOIN observations o ON o.tray_code = et.tray_code
+               WHERE et.experiment_id = ?
+               ORDER BY et.group_id, o.seedling_id, o.captured_at""",
+            (experiment_id,),
+        ).fetchall()
+
+    started_at = datetime.fromisoformat(experiment["started_at"])
+    ended_at = datetime.fromisoformat(experiment["ended_at"]) if experiment["ended_at"] else None
+    summaries = []
+    for group in groups:
+        valid_rows = [
+            row
+            for row in observation_rows
+            if row["group_id"] == group["id"]
+            and datetime.fromisoformat(row["captured_at"]) >= started_at
+            and (ended_at is None or datetime.fromisoformat(row["captured_at"]) <= ended_at)
+        ]
+        summary = summarize_group_growth(
+            group_id=group["id"],
+            group_name=group["name"],
+            group_kind=group["kind"],
+            observation_rows=valid_rows,
+        )
+        summaries.append(
+            GroupGrowthSummaryRead(
+                group_id=summary.group_id,
+                group_name=summary.group_name,
+                group_kind=summary.group_kind,
+                sample_size=summary.sample_size,
+                mean_growth_rate_percent=summary.mean_growth_rate_percent,
+                median_growth_rate_percent=summary.median_growth_rate_percent,
+                standard_deviation_percent=summary.standard_deviation_percent,
+                minimum_growth_rate_percent=summary.minimum_growth_rate_percent,
+                maximum_growth_rate_percent=summary.maximum_growth_rate_percent,
+                samples=[GrowthSampleRead(**sample.__dict__) for sample in summary.samples],
+            )
+        )
+    return ExperimentComparisonRead(
+        experiment_id=experiment_id,
+        experiment_name=experiment["name"],
+        groups=summaries,
+        interpretation_note=(
+            "Descriptive statistics only. Group differences are not evidence of causality or "
+            "statistical significance without an appropriate experimental analysis."
+        ),
     )
 
 

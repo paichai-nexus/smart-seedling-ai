@@ -292,3 +292,39 @@ class ExperimentRead(BaseModel):
     ended_at: Optional[datetime]
     created_by: str
     groups: list[ExperimentGroupRead]
+
+
+class ExperimentListItem(BaseModel):
+    id: int
+    name: str
+    crop: str
+    started_at: datetime
+    ended_at: Optional[datetime]
+
+
+class GrowthSampleRead(BaseModel):
+    seedling_id: str
+    initial_leaf_area_cm2: float
+    final_leaf_area_cm2: float
+    growth_rate_percent: float
+    observation_count: int
+
+
+class GroupGrowthSummaryRead(BaseModel):
+    group_id: int
+    group_name: str
+    group_kind: ExperimentGroupKind
+    sample_size: int
+    mean_growth_rate_percent: float
+    median_growth_rate_percent: float
+    standard_deviation_percent: float
+    minimum_growth_rate_percent: float
+    maximum_growth_rate_percent: float
+    samples: list[GrowthSampleRead]
+
+
+class ExperimentComparisonRead(BaseModel):
+    experiment_id: int
+    experiment_name: str
+    groups: list[GroupGrowthSummaryRead]
+    interpretation_note: str

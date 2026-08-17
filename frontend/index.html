@@ -22,6 +22,11 @@
     svg { width: 100%; height: 240px; margin-top: 18px; overflow: visible; }
     .axis { stroke: #376348; stroke-width: 1; } .line { fill: none; stroke: #70e49c; stroke-width: 3; }
     .empty { color: #789083; padding: 70px 0; text-align: center; }
+    .comparison-bars { display: grid; gap: 12px; margin-top: 20px; }
+    .bar-row { display: grid; grid-template-columns: 170px 1fr 90px; gap: 12px; align-items: center; }
+    .bar-track { height: 18px; background: #07120d; border-radius: 20px; overflow: hidden; }
+    .bar-fill { height: 100%; background: #70e49c; border-radius: inherit; min-width: 2px; }
+    .control-bar { background: #6da8ff; }
     footer { margin-top: 48px; color: #789083; font-size: .9rem; }
     @media (max-width: 720px) { header { display: block; } .grid { grid-template-columns: 1fr 1fr; } }
   </style>
@@ -44,6 +49,13 @@
       <select id="seedling-select" aria-label="모종 선택"><option value="">모종 선택</option></select>
     </div>
     <div id="chart"><div class="empty">관측 데이터가 쌓이면 잎 면적 변화를 표시합니다.</div></div>
+  </article>
+  <article class="panel">
+    <div class="panel-head">
+      <div><div class="eyebrow">Experiment comparison</div><h2>실험군 성장률 비교</h2></div>
+      <select id="experiment-select" aria-label="실험 선택"><option value="">실험 선택</option></select>
+    </div>
+    <div id="comparison"><div class="empty">대조군과 처리군이 포함된 실험을 선택하세요.</div></div>
   </article>
   <footer id="updated">데이터를 불러오는 중…</footer>
 </main>
@@ -92,6 +104,43 @@ function drawChart(points) {
       <polyline class="line" points="${coords}" />
     </svg>
     <div>최근 잎 면적 <strong>${latest.leaf_area_cm2.toFixed(2)} cm²</strong> · 관측 ${points.length}회</div>`;
+}
+
+const experimentSelect = document.getElementById('experiment-select');
+fetch('/api/v1/experiments').then(r => r.json()).then(experiments => {
+  experiments.forEach(experiment => {
+    const option = document.createElement('option');
+    option.value = experiment.id;
+    option.textContent = `${experiment.name} · ${experiment.crop}`;
+    experimentSelect.appendChild(option);
+  });
+});
+
+experimentSelect.addEventListener('change', async event => {
+  if (!event.target.value) return;
+  const comparison = await fetch(`/api/v1/experiments/${event.target.value}/comparison`).then(r => r.json());
+  drawComparison(comparison);
+});
+
+function drawComparison(comparison) {
+  const container = document.getElementById('comparison');
+  container.replaceChildren();
+  const bars = document.createElement('div');
+  bars.className = 'comparison-bars';
+  const maximum = Math.max(...comparison.groups.map(group => Math.abs(group.mean_growth_rate_percent)), 1);
+  comparison.groups.forEach(group => {
+    const row = document.createElement('div'); row.className = 'bar-row';
+    const label = document.createElement('span'); label.textContent = `${group.group_name} (n=${group.sample_size})`;
+    const track = document.createElement('div'); track.className = 'bar-track';
+    const fill = document.createElement('div');
+    fill.className = `bar-fill ${group.group_kind === 'control' ? 'control-bar' : ''}`;
+    fill.style.width = `${Math.abs(group.mean_growth_rate_percent) / maximum * 100}%`;
+    track.appendChild(fill);
+    const value = document.createElement('strong'); value.textContent = `${group.mean_growth_rate_percent.toFixed(1)}%`;
+    row.append(label, track, value); bars.appendChild(row);
+  });
+  const note = document.createElement('p'); note.className = 'notice'; note.textContent = comparison.interpretation_note;
+  container.append(bars, note);
 }
 </script>
 </body>

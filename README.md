@@ -86,6 +86,12 @@ export produces one row per seedling observation and includes group identity,
 Vision metrics, linked sensor context, and the latest expert assessment. Records
 outside the declared experiment period are excluded using timezone-aware times.
 
+The experiment comparison endpoint calculates each seedling's relative change
+between its first and last valid observation, then reports group sample size,
+mean, median, population standard deviation, minimum, and maximum. These are
+descriptive statistics; the dashboard explicitly avoids claiming significance
+or causality.
+
 Run tests:
 
 ```bash
