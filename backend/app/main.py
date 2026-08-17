@@ -24,8 +24,15 @@ from .schemas import (
     TrayAnalysisRead,
     TrayCellAnalysis,
     TrayCreate,
+    TrayRectificationRead,
 )
-from .vision import analyze_green_leaf_area, assess_capture_quality, decode_image, split_tray_grid
+from .vision import (
+    analyze_green_leaf_area,
+    assess_capture_quality,
+    decode_image,
+    detect_and_rectify_tray,
+    split_tray_grid,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 repository = Repository(os.getenv("SMART_SEEDLING_DB", str(ROOT / "smart_seedling.db")))
@@ -222,6 +229,8 @@ async def analyze_tray_image(
     captured_at: Annotated[datetime, Form()],
     pixels_per_cm: Annotated[float, Form(gt=0)],
     margin_ratio: Annotated[float, Form(ge=0, lt=0.4)] = 0.08,
+    rectify: Annotated[bool, Form()] = False,
+    minimum_tray_area_ratio: Annotated[float, Form(gt=0, lt=1)] = 0.25,
 ) -> TrayAnalysisRead:
     tray_code = tray_code.upper()
     if image.content_type not in {"image/jpeg", "image/png"}:
@@ -247,7 +256,13 @@ async def analyze_tray_image(
                     "quality": quality_response(quality).model_dump(),
                 },
             )
-        cells = split_tray_grid(decoded, tray["rows"], tray["columns"], margin_ratio)
+        if rectify:
+            rectification = detect_and_rectify_tray(decoded, minimum_tray_area_ratio)
+            analysis_image = rectification.image
+        else:
+            rectification = None
+            analysis_image = decoded
+        cells = split_tray_grid(analysis_image, tray["rows"], tray["columns"], margin_ratio)
     except HTTPException:
         raise
     except ValueError as exc:
@@ -303,6 +318,11 @@ async def analyze_tray_image(
         captured_at=captured_at,
         image_path=relative_path,
         quality=quality_response(quality),
+        rectification=TrayRectificationRead(
+            applied=rectification is not None,
+            corners=[list(point) for point in rectification.corners] if rectification else [],
+            source_area_ratio=rectification.source_area_ratio if rectification else None,
+        ),
         cells=[
             TrayCellAnalysis(
                 row=observation.row,

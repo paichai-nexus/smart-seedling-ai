@@ -95,6 +95,12 @@ class TrayCellAnalysis(BaseModel):
     status: HealthStatus
 
 
+class TrayRectificationRead(BaseModel):
+    applied: bool
+    corners: list[list[float]]
+    source_area_ratio: Optional[float]
+
+
 class TrayAnalysisRead(BaseModel):
     capture_id: int
     tray_code: str
@@ -102,3 +108,4 @@ class TrayAnalysisRead(BaseModel):
     image_path: str
     cells: list[TrayCellAnalysis]
     quality: CaptureQualityRead
+    rectification: TrayRectificationRead

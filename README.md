@@ -49,6 +49,12 @@ blur score, mean brightness, and black/white clipping ratios. Rejected captures
 return actionable reason codes such as `image_too_blurry` or `image_too_dark`
 and do not create research observations.
 
+Full-tray uploads can set `rectify=true` to detect the dominant quadrilateral
+tray boundary and apply a top-down perspective transform before grid splitting.
+The normalized source corners and detected area ratio are returned for audit.
+If boundary detection is unreliable, the API rejects the capture instead of
+silently assigning seedlings to the wrong cells.
+
 Run tests:
 
 ```bash

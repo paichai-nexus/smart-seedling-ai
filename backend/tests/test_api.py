@@ -112,3 +112,38 @@ def test_quality_gate_rejects_bad_capture_before_persistence(tmp_path: Path):
     assert response.json()["detail"]["message"] == "Capture quality gate failed"
     assert "image_too_dark" in response.json()["detail"]["quality"]["reasons"]
     assert seedlings == []
+
+
+def test_tray_endpoint_can_rectify_perspective_capture(tmp_path: Path):
+    main.repository = Repository(tmp_path / "rectify.db")
+    main.UPLOAD_ROOT = tmp_path / "uploads"
+    image = np.full((300, 400, 3), 40, dtype=np.uint8)
+    polygon = np.array([[80, 40], [340, 70], [310, 260], [50, 230]], dtype=np.int32)
+    cv2.fillConvexPoly(image, polygon, (110, 110, 110))
+    cv2.polylines(image, [polygon], True, (240, 240, 240), 5)
+    success, encoded = cv2.imencode(".png", image)
+    assert success
+
+    with TestClient(main.app) as client:
+        assert (
+            client.post(
+                "/api/v1/trays",
+                json={"code": "TRAY-R", "crop": "lettuce", "rows": 2, "columns": 2},
+            ).status_code
+            == 201
+        )
+        response = client.post(
+            "/api/v1/trays/TRAY-R/images/analyze",
+            files={"image": ("perspective.png", encoded.tobytes(), "image/png")},
+            data={
+                "captured_at": "2026-08-19T09:00:00+09:00",
+                "pixels_per_cm": "10",
+                "rectify": "true",
+            },
+        )
+
+    assert response.status_code == 201, response.text
+    rectification = response.json()["rectification"]
+    assert rectification["applied"] is True
+    assert len(rectification["corners"]) == 4
+    assert rectification["source_area_ratio"] > 0.35
