@@ -16,6 +16,17 @@
     article { background: #102219; border: 1px solid #214431; border-radius: 18px; padding: 22px; }
     .value { font-size: 2.4rem; font-weight: 700; margin-top: 18px; }
     .healthy { color: #70e49c; } .warning { color: #ffd166; } .review { color: #ff786e; }
+    .panel { margin-top: 14px; }
+    .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+    select { background: #07120d; color: #e8f5ec; border: 1px solid #376348; border-radius: 10px; padding: 10px; }
+    svg { width: 100%; height: 240px; margin-top: 18px; overflow: visible; }
+    .axis { stroke: #376348; stroke-width: 1; } .line { fill: none; stroke: #70e49c; stroke-width: 3; }
+    .empty { color: #789083; padding: 70px 0; text-align: center; }
+    .comparison-bars { display: grid; gap: 12px; margin-top: 20px; }
+    .bar-row { display: grid; grid-template-columns: 170px 1fr 90px; gap: 12px; align-items: center; }
+    .bar-track { height: 18px; background: #07120d; border-radius: 20px; overflow: hidden; }
+    .bar-fill { height: 100%; background: #70e49c; border-radius: inherit; min-width: 2px; }
+    .control-bar { background: #6da8ff; }
     footer { margin-top: 48px; color: #789083; font-size: .9rem; }
     @media (max-width: 720px) { header { display: block; } .grid { grid-template-columns: 1fr 1fr; } }
   </style>
@@ -32,6 +43,20 @@
     <article><div>관찰 필요</div><div class="value warning" id="warning">—</div></article>
     <article><div>전문가 확인</div><div class="value review" id="review">—</div></article>
   </section>
+  <article class="panel">
+    <div class="panel-head">
+      <div><div class="eyebrow">Growth timeline</div><h2 id="chart-title">개체를 선택하세요</h2></div>
+      <select id="seedling-select" aria-label="모종 선택"><option value="">모종 선택</option></select>
+    </div>
+    <div id="chart"><div class="empty">관측 데이터가 쌓이면 잎 면적 변화를 표시합니다.</div></div>
+  </article>
+  <article class="panel">
+    <div class="panel-head">
+      <div><div class="eyebrow">Experiment comparison</div><h2>실험군 성장률 비교</h2></div>
+      <select id="experiment-select" aria-label="실험 선택"><option value="">실험 선택</option></select>
+    </div>
+    <div id="comparison"><div class="empty">대조군과 처리군이 포함된 실험을 선택하세요.</div></div>
+  </article>
   <footer id="updated">데이터를 불러오는 중…</footer>
 </main>
 <script>
@@ -42,7 +67,81 @@ fetch('/api/v1/summary').then(r => r.json()).then(data => {
   review.textContent = data.expert_review;
   updated.textContent = data.latest_capture_at ? `최근 촬영: ${data.latest_capture_at}` : '아직 관측 데이터가 없습니다.';
 }).catch(() => updated.textContent = 'API 연결을 확인해주세요.');
+
+const select = document.getElementById('seedling-select');
+fetch('/api/v1/seedlings').then(r => r.json()).then(seedlings => {
+  seedlings.forEach(item => {
+    const option = document.createElement('option');
+    option.value = item.seedling_id;
+    option.textContent = `${item.seedling_id} · ${item.leaf_area_cm2.toFixed(1)} cm²`;
+    select.appendChild(option);
+  });
+});
+
+select.addEventListener('change', async event => {
+  const id = event.target.value;
+  if (!id) return;
+  const points = await fetch(`/api/v1/seedlings/${encodeURIComponent(id)}/history`).then(r => r.json());
+  document.getElementById('chart-title').textContent = id;
+  drawChart(points);
+});
+
+function drawChart(points) {
+  if (!Array.isArray(points) || points.length === 0) return;
+  const width = 900, height = 220, pad = 28;
+  const values = points.map(p => p.leaf_area_cm2);
+  const max = Math.max(...values, 1), min = Math.min(...values, 0);
+  const range = max - min || 1;
+  const coords = values.map((value, index) => {
+    const x = pad + index * ((width - pad * 2) / Math.max(points.length - 1, 1));
+    const y = height - pad - ((value - min) / range) * (height - pad * 2);
+    return `${x},${y}`;
+  }).join(' ');
+  const latest = points[points.length - 1];
+  document.getElementById('chart').innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="잎 면적 성장 그래프">
+      <line class="axis" x1="${pad}" y1="${height-pad}" x2="${width-pad}" y2="${height-pad}" />
+      <polyline class="line" points="${coords}" />
+    </svg>
+    <div>최근 잎 면적 <strong>${latest.leaf_area_cm2.toFixed(2)} cm²</strong> · 관측 ${points.length}회</div>`;
+}
+
+const experimentSelect = document.getElementById('experiment-select');
+fetch('/api/v1/experiments').then(r => r.json()).then(experiments => {
+  experiments.forEach(experiment => {
+    const option = document.createElement('option');
+    option.value = experiment.id;
+    option.textContent = `${experiment.name} · ${experiment.crop}`;
+    experimentSelect.appendChild(option);
+  });
+});
+
+experimentSelect.addEventListener('change', async event => {
+  if (!event.target.value) return;
+  const comparison = await fetch(`/api/v1/experiments/${event.target.value}/comparison`).then(r => r.json());
+  drawComparison(comparison);
+});
+
+function drawComparison(comparison) {
+  const container = document.getElementById('comparison');
+  container.replaceChildren();
+  const bars = document.createElement('div');
+  bars.className = 'comparison-bars';
+  const maximum = Math.max(...comparison.groups.map(group => Math.abs(group.mean_growth_rate_percent)), 1);
+  comparison.groups.forEach(group => {
+    const row = document.createElement('div'); row.className = 'bar-row';
+    const label = document.createElement('span'); label.textContent = `${group.group_name} (n=${group.sample_size})`;
+    const track = document.createElement('div'); track.className = 'bar-track';
+    const fill = document.createElement('div');
+    fill.className = `bar-fill ${group.group_kind === 'control' ? 'control-bar' : ''}`;
+    fill.style.width = `${Math.abs(group.mean_growth_rate_percent) / maximum * 100}%`;
+    track.appendChild(fill);
+    const value = document.createElement('strong'); value.textContent = `${group.mean_growth_rate_percent.toFixed(1)}%`;
+    row.append(label, track, value); bars.appendChild(row);
+  });
+  const note = document.createElement('p'); note.className = 'notice'; note.textContent = comparison.interpretation_note;
+  container.append(bars, note);
+}
 </script>
 </body>
 </html>
-

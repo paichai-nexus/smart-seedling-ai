@@ -12,6 +12,24 @@ class HealthStatus(str, Enum):
     EXPERT_REVIEW = "expert_review"
 
 
+class ExpertAssessment(str, Enum):
+    HEALTHY = "healthy"
+    WARNING = "warning"
+    ABNORMAL = "abnormal"
+    UNCERTAIN = "uncertain"
+
+
+class RuleStatus(str, Enum):
+    DRAFT = "draft"
+    APPROVED = "approved"
+    RETIRED = "retired"
+
+
+class ExperimentGroupKind(str, Enum):
+    CONTROL = "control"
+    TREATMENT = "treatment"
+
+
 @dataclass(frozen=True)
 class ObservationMetrics:
     leaf_area_cm2: float
