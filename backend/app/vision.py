@@ -15,6 +15,13 @@ class LeafAnalysis:
     confidence: float
 
 
+@dataclass(frozen=True)
+class TrayCell:
+    row: int
+    column: int
+    image: np.ndarray
+
+
 def decode_image(content: bytes) -> np.ndarray:
     encoded = np.frombuffer(content, dtype=np.uint8)
     image = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
@@ -54,3 +61,30 @@ def analyze_green_leaf_area(image: np.ndarray, pixels_per_cm: float) -> LeafAnal
         coverage_ratio=round(coverage, 4),
         confidence=confidence,
     )
+
+
+def split_tray_grid(
+    image: np.ndarray,
+    rows: int,
+    columns: int,
+    margin_ratio: float = 0.08,
+) -> list[TrayCell]:
+    """Split a rectified tray image into stable cells with an inner margin."""
+    if rows < 1 or columns < 1:
+        raise ValueError("rows and columns must be positive")
+    if not 0 <= margin_ratio < 0.4:
+        raise ValueError("margin_ratio must be between 0 and 0.4")
+    height, width = image.shape[:2]
+    if height < rows or width < columns:
+        raise ValueError("image is smaller than the requested tray grid")
+
+    cells = []
+    for row in range(rows):
+        y0, y1 = round(row * height / rows), round((row + 1) * height / rows)
+        for column in range(columns):
+            x0, x1 = round(column * width / columns), round((column + 1) * width / columns)
+            x_margin = round((x1 - x0) * margin_ratio)
+            y_margin = round((y1 - y0) * margin_ratio)
+            crop = image[y0 + y_margin : y1 - y_margin, x0 + x_margin : x1 - x_margin]
+            cells.append(TrayCell(row=row + 1, column=column + 1, image=crop))
+    return cells

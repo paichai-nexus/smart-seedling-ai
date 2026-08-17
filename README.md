@@ -37,6 +37,13 @@ camera setup. This converts projected green pixels to square centimetres; it is
 not a biological diagnosis. Use `POST /api/v1/images/analyze` in the API docs to
 upload a JPEG or PNG and create the corresponding observation.
 
+For a rectified full-tray capture, use
+`POST /api/v1/trays/{tray_code}/images/analyze`. The endpoint reads the tray's
+stored row/column geometry, removes a configurable inner cell margin, analyzes
+every cell in row-major order, and persists one time-series observation per
+seedling. This fixed-grid method assumes the tray boundary is aligned with the
+image; perspective rectification is the next capture-quality milestone.
+
 Run tests:
 
 ```bash

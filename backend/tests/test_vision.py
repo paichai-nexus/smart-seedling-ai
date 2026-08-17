@@ -2,7 +2,7 @@ import unittest
 
 import cv2
 import numpy as np
-from app.vision import analyze_green_leaf_area, decode_image
+from app.vision import analyze_green_leaf_area, decode_image, split_tray_grid
 
 
 class VisionTests(unittest.TestCase):
@@ -25,3 +25,17 @@ class VisionTests(unittest.TestCase):
     def test_invalid_bytes_are_rejected(self):
         with self.assertRaises(ValueError):
             decode_image(b"not an image")
+
+    def test_tray_grid_uses_one_based_row_major_cells(self):
+        image = np.zeros((100, 200, 3), dtype=np.uint8)
+        cells = split_tray_grid(image, rows=2, columns=4, margin_ratio=0)
+
+        self.assertEqual(len(cells), 8)
+        self.assertEqual((cells[0].row, cells[0].column), (1, 1))
+        self.assertEqual((cells[-1].row, cells[-1].column), (2, 4))
+        self.assertEqual(cells[0].image.shape, (50, 50, 3))
+
+    def test_tray_grid_margin_removes_cell_edges(self):
+        image = np.zeros((100, 100, 3), dtype=np.uint8)
+        cell = split_tray_grid(image, rows=1, columns=1, margin_ratio=0.1)[0]
+        self.assertEqual(cell.image.shape, (80, 80, 3))

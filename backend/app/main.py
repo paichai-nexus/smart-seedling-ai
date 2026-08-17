@@ -20,9 +20,11 @@ from .schemas import (
     ObservationRead,
     SeedlingHistoryPoint,
     SeedlingLatest,
+    TrayAnalysisRead,
+    TrayCellAnalysis,
     TrayCreate,
 )
-from .vision import analyze_green_leaf_area, decode_image
+from .vision import analyze_green_leaf_area, decode_image, split_tray_grid
 
 ROOT = Path(__file__).resolve().parents[2]
 repository = Repository(os.getenv("SMART_SEEDLING_DB", str(ROOT / "smart_seedling.db")))
@@ -181,6 +183,102 @@ async def analyze_image(
         coverage_ratio=analysis.coverage_ratio,
         analysis_confidence=analysis.confidence,
         status=observation.status,
+    )
+
+
+@app.post(
+    "/api/v1/trays/{tray_code}/images/analyze",
+    response_model=TrayAnalysisRead,
+    status_code=201,
+)
+async def analyze_tray_image(
+    tray_code: str,
+    image: Annotated[UploadFile, File()],
+    captured_at: Annotated[datetime, Form()],
+    pixels_per_cm: Annotated[float, Form(gt=0)],
+    margin_ratio: Annotated[float, Form(ge=0, lt=0.4)] = 0.08,
+) -> TrayAnalysisRead:
+    tray_code = tray_code.upper()
+    if image.content_type not in {"image/jpeg", "image/png"}:
+        raise HTTPException(status_code=415, detail="Only JPEG and PNG images are supported")
+    content = await image.read(MAX_IMAGE_BYTES + 1)
+    if len(content) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image exceeds the 10 MB limit")
+    with repository.connect() as connection:
+        tray = connection.execute(
+            "SELECT rows, columns FROM trays WHERE code = ?", (tray_code,)
+        ).fetchone()
+    if tray is None:
+        raise HTTPException(status_code=404, detail="Tray not found")
+
+    try:
+        decoded = decode_image(content)
+        cells = split_tray_grid(decoded, tray["rows"], tray["columns"], margin_ratio)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    results = []
+    for cell in cells:
+        analysis = analyze_green_leaf_area(cell.image, pixels_per_cm)
+        observation = create_observation(
+            ObservationCreate(
+                tray_code=tray_code,
+                row=cell.row,
+                column=cell.column,
+                captured_at=captured_at,
+                leaf_area_cm2=analysis.leaf_area_cm2,
+                confidence=analysis.confidence,
+            )
+        )
+        results.append((observation, analysis))
+
+    extension = ".png" if image.content_type == "image/png" else ".jpg"
+    relative_path = f"{tray_code}/{captured_at.date().isoformat()}/tray-{uuid4().hex}{extension}"
+    destination = UPLOAD_ROOT / relative_path
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(content)
+    try:
+        with repository.connect() as connection:
+            cursor = connection.execute(
+                """INSERT INTO tray_captures(
+                       tray_code, captured_at, relative_path, sha256, mime_type, pixels_per_cm
+                   ) VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    tray_code,
+                    captured_at.isoformat(),
+                    relative_path,
+                    sha256(content).hexdigest(),
+                    image.content_type,
+                    pixels_per_cm,
+                ),
+            )
+            capture_id = cursor.lastrowid
+            connection.executemany(
+                "INSERT INTO capture_observations(capture_id, observation_id) VALUES (?, ?)",
+                [(capture_id, observation.id) for observation, _ in results],
+            )
+    except Exception as exc:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(status_code=409, detail="Tray capture already exists") from exc
+
+    return TrayAnalysisRead(
+        capture_id=capture_id,
+        tray_code=tray_code,
+        captured_at=captured_at,
+        image_path=relative_path,
+        cells=[
+            TrayCellAnalysis(
+                row=observation.row,
+                column=observation.column,
+                seedling_id=observation.seedling_id,
+                observation_id=observation.id,
+                leaf_area_cm2=analysis.leaf_area_cm2,
+                coverage_ratio=analysis.coverage_ratio,
+                analysis_confidence=analysis.confidence,
+                status=observation.status,
+            )
+            for observation, analysis in results
+        ],
     )
 
 

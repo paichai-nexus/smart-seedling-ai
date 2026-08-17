@@ -72,3 +72,22 @@ class SeedlingHistoryPoint(BaseModel):
     discoloration_ratio: float
     damage_ratio: float
     status: HealthStatus
+
+
+class TrayCellAnalysis(BaseModel):
+    row: int
+    column: int
+    seedling_id: str
+    observation_id: int
+    leaf_area_cm2: float
+    coverage_ratio: float
+    analysis_confidence: float
+    status: HealthStatus
+
+
+class TrayAnalysisRead(BaseModel):
+    capture_id: int
+    tray_code: str
+    captured_at: datetime
+    image_path: str
+    cells: list[TrayCellAnalysis]

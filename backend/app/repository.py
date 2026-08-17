@@ -38,6 +38,22 @@ CREATE TABLE IF NOT EXISTS image_assets (
     mime_type TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS tray_captures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tray_code TEXT NOT NULL REFERENCES trays(code),
+    captured_at TEXT NOT NULL,
+    relative_path TEXT NOT NULL UNIQUE,
+    sha256 TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    pixels_per_cm REAL NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(tray_code, captured_at)
+);
+CREATE TABLE IF NOT EXISTS capture_observations (
+    capture_id INTEGER NOT NULL REFERENCES tray_captures(id),
+    observation_id INTEGER NOT NULL REFERENCES observations(id),
+    PRIMARY KEY(capture_id, observation_id)
+);
 """
 
 
