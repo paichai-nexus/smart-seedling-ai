@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Smart Seedling AI</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; }
+    body { margin: 0; background: #07120d; color: #e8f5ec; }
+    main { max-width: 1080px; margin: auto; padding: 56px 24px; }
+    header { display: flex; justify-content: space-between; align-items: end; gap: 24px; }
+    h1 { margin: 0; font-size: clamp(2rem, 6vw, 4.5rem); letter-spacing: -.06em; }
+    .eyebrow { color: #7ee2a8; text-transform: uppercase; letter-spacing: .18em; }
+    .notice { color: #a9bcb0; max-width: 480px; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 44px; }
+    article { background: #102219; border: 1px solid #214431; border-radius: 18px; padding: 22px; }
+    .value { font-size: 2.4rem; font-weight: 700; margin-top: 18px; }
+    .healthy { color: #70e49c; } .warning { color: #ffd166; } .review { color: #ff786e; }
+    footer { margin-top: 48px; color: #789083; font-size: .9rem; }
+    @media (max-width: 720px) { header { display: block; } .grid { grid-template-columns: 1fr 1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div><div class="eyebrow">Research dashboard</div><h1>Smart Seedling AI</h1></div>
+    <p class="notice">영상 기반 관찰 결과이며 진단이 아닙니다. 이상징후의 원인과 처방은 원예 전문가가 추가 측정값과 함께 검토합니다.</p>
+  </header>
+  <section class="grid">
+    <article><div>전체 모종</div><div class="value" id="total">—</div></article>
+    <article><div>정상</div><div class="value healthy" id="healthy">—</div></article>
+    <article><div>관찰 필요</div><div class="value warning" id="warning">—</div></article>
+    <article><div>전문가 확인</div><div class="value review" id="review">—</div></article>
+  </section>
+  <footer id="updated">데이터를 불러오는 중…</footer>
+</main>
+<script>
+fetch('/api/v1/summary').then(r => r.json()).then(data => {
+  total.textContent = data.total_seedlings;
+  healthy.textContent = data.healthy;
+  warning.textContent = data.warning;
+  review.textContent = data.expert_review;
+  updated.textContent = data.latest_capture_at ? `최근 촬영: ${data.latest_capture_at}` : '아직 관측 데이터가 없습니다.';
+}).catch(() => updated.textContent = 'API 연결을 확인해주세요.');
+</script>
+</body>
+</html>
+
