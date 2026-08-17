@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .domain import HealthStatus
 
@@ -121,8 +121,16 @@ class SensorReadingCreate(BaseModel):
     ec_ms_cm: Optional[float] = Field(default=None, ge=0, le=20)
     ph: Optional[float] = Field(default=None, ge=0, le=14)
 
-    def has_measurement(self) -> bool:
-        return any(
+    @field_validator("measured_at")
+    @classmethod
+    def measured_at_requires_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("measured_at must include a timezone offset")
+        return value
+
+    @model_validator(mode="after")
+    def require_measurement(self):
+        has_measurement = any(
             value is not None
             for value in (
                 self.temperature_c,
@@ -133,6 +141,9 @@ class SensorReadingCreate(BaseModel):
                 self.ph,
             )
         )
+        if not has_measurement:
+            raise ValueError("at least one sensor measurement is required")
+        return self
 
 
 class SensorReadingRead(SensorReadingCreate):

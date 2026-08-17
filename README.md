@@ -55,6 +55,13 @@ The normalized source corners and detected area ratio are returned for audit.
 If boundary detection is unreliable, the API rejects the capture instead of
 silently assigning seedlings to the wrong cells.
 
+Environmental measurements are ingested with
+`POST /api/v1/trays/{tray_code}/sensor-readings` and read back as a latest-first
+time series. Temperature, humidity, soil moisture, illuminance, EC, and pH are
+nullable independently so an inexpensive edge node can report only the sensors
+it actually has. Timestamps must include a timezone offset and duplicate
+tray/time/source readings are rejected.
+
 Run tests:
 
 ```bash

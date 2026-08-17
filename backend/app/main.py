@@ -21,6 +21,8 @@ from .schemas import (
     ObservationRead,
     SeedlingHistoryPoint,
     SeedlingLatest,
+    SensorReadingCreate,
+    SensorReadingRead,
     TrayAnalysisRead,
     TrayCellAnalysis,
     TrayCreate,
@@ -426,3 +428,59 @@ def seedling_history(seedling_id: str, limit: int = 100) -> list[SeedlingHistory
         )
         previous_area = row["leaf_area_cm2"]
     return points
+
+
+@app.post(
+    "/api/v1/trays/{tray_code}/sensor-readings",
+    response_model=SensorReadingRead,
+    status_code=201,
+)
+def create_sensor_reading(tray_code: str, payload: SensorReadingCreate) -> SensorReadingRead:
+    tray_code = tray_code.upper()
+    with repository.connect() as connection:
+        tray = connection.execute("SELECT 1 FROM trays WHERE code = ?", (tray_code,)).fetchone()
+        if tray is None:
+            raise HTTPException(status_code=404, detail="Tray not found")
+        try:
+            cursor = connection.execute(
+                """INSERT INTO sensor_readings(
+                       tray_code, measured_at, source, temperature_c, humidity_percent,
+                       soil_moisture_percent, illuminance_lux, ec_ms_cm, ph
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    tray_code,
+                    payload.measured_at.isoformat(),
+                    payload.source,
+                    payload.temperature_c,
+                    payload.humidity_percent,
+                    payload.soil_moisture_percent,
+                    payload.illuminance_lux,
+                    payload.ec_ms_cm,
+                    payload.ph,
+                ),
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail="Sensor reading already exists") from exc
+    return SensorReadingRead(id=cursor.lastrowid, tray_code=tray_code, **payload.model_dump())
+
+
+@app.get(
+    "/api/v1/trays/{tray_code}/sensor-readings",
+    response_model=list[SensorReadingRead],
+)
+def list_sensor_readings(tray_code: str, limit: int = 100) -> list[SensorReadingRead]:
+    if not 1 <= limit <= 1000:
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 1000")
+    tray_code = tray_code.upper()
+    with repository.connect() as connection:
+        tray = connection.execute("SELECT 1 FROM trays WHERE code = ?", (tray_code,)).fetchone()
+        if tray is None:
+            raise HTTPException(status_code=404, detail="Tray not found")
+        rows = connection.execute(
+            """SELECT id, tray_code, measured_at, source, temperature_c,
+                      humidity_percent, soil_moisture_percent, illuminance_lux, ec_ms_cm, ph
+               FROM sensor_readings WHERE tray_code = ?
+               ORDER BY measured_at DESC LIMIT ?""",
+            (tray_code, limit),
+        ).fetchall()
+    return [SensorReadingRead(**dict(row)) for row in rows]

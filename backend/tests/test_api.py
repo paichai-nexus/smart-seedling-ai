@@ -147,3 +147,43 @@ def test_tray_endpoint_can_rectify_perspective_capture(tmp_path: Path):
     assert rectification["applied"] is True
     assert len(rectification["corners"]) == 4
     assert rectification["source_area_ratio"] > 0.35
+
+
+def test_sensor_readings_are_validated_and_returned_latest_first(tmp_path: Path):
+    main.repository = Repository(tmp_path / "sensors.db")
+    with TestClient(main.app) as client:
+        assert (
+            client.post(
+                "/api/v1/trays",
+                json={"code": "TRAY-S", "crop": "tomato", "rows": 1, "columns": 1},
+            ).status_code
+            == 201
+        )
+        empty = client.post(
+            "/api/v1/trays/TRAY-S/sensor-readings",
+            json={"measured_at": "2026-08-20T09:00:00+09:00", "source": "edge-01"},
+        )
+        naive_time = client.post(
+            "/api/v1/trays/TRAY-S/sensor-readings",
+            json={"measured_at": "2026-08-20T09:00:00", "temperature_c": 24},
+        )
+        for hour, temperature in [(9, 24.2), (10, 25.1)]:
+            response = client.post(
+                "/api/v1/trays/TRAY-S/sensor-readings",
+                json={
+                    "measured_at": f"2026-08-20T{hour:02d}:00:00+09:00",
+                    "source": "edge-01",
+                    "temperature_c": temperature,
+                    "humidity_percent": 61,
+                    "soil_moisture_percent": 43,
+                    "illuminance_lux": 12000,
+                    "ec_ms_cm": 1.7,
+                    "ph": 6.2,
+                },
+            )
+            assert response.status_code == 201, response.text
+        readings = client.get("/api/v1/trays/TRAY-S/sensor-readings").json()
+
+    assert empty.status_code == 422
+    assert naive_time.status_code == 422
+    assert [reading["temperature_c"] for reading in readings] == [25.1, 24.2]
