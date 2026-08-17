@@ -109,6 +109,31 @@ CREATE TABLE IF NOT EXISTS knowledge_rules (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK(status != 'approved' OR (approved_by IS NOT NULL AND approved_at IS NOT NULL))
 );
+CREATE TABLE IF NOT EXISTS experiments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    crop TEXT NOT NULL,
+    hypothesis TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS experiment_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    experiment_id INTEGER NOT NULL REFERENCES experiments(id),
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('control', 'treatment')),
+    description TEXT NOT NULL,
+    UNIQUE(experiment_id, name)
+);
+CREATE TABLE IF NOT EXISTS experiment_trays (
+    experiment_id INTEGER NOT NULL REFERENCES experiments(id),
+    group_id INTEGER NOT NULL REFERENCES experiment_groups(id),
+    tray_code TEXT NOT NULL REFERENCES trays(code),
+    assigned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(experiment_id, tray_code)
+);
 """
 
 

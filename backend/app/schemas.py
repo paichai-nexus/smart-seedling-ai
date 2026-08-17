@@ -5,7 +5,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .domain import ExpertAssessment, HealthStatus, RuleStatus
+from .domain import ExperimentGroupKind, ExpertAssessment, HealthStatus, RuleStatus
 
 
 class TrayCreate(BaseModel):
@@ -243,3 +243,52 @@ class ObservationRecommendationRead(BaseModel):
     observed_signals: list[str]
     rules: list[RecommendationRuleRead]
     disclaimer: str
+
+
+class ExperimentGroupCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    kind: ExperimentGroupKind
+    description: str = Field(min_length=1, max_length=1000)
+    tray_codes: list[str] = Field(min_length=1)
+
+
+class ExperimentCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    crop: str = Field(min_length=1, max_length=100)
+    hypothesis: str = Field(min_length=1, max_length=2000)
+    started_at: datetime
+    ended_at: Optional[datetime] = None
+    created_by: str = Field(min_length=1, max_length=100)
+    groups: list[ExperimentGroupCreate] = Field(min_length=2)
+
+    @model_validator(mode="after")
+    def validate_experiment_design(self):
+        for timestamp in (self.started_at, self.ended_at):
+            if timestamp is not None and (
+                timestamp.tzinfo is None or timestamp.utcoffset() is None
+            ):
+                raise ValueError("experiment timestamps must include a timezone offset")
+        if self.ended_at is not None and self.ended_at <= self.started_at:
+            raise ValueError("ended_at must be after started_at")
+        kinds = {group.kind for group in self.groups}
+        if ExperimentGroupKind.CONTROL not in kinds or ExperimentGroupKind.TREATMENT not in kinds:
+            raise ValueError("an experiment requires control and treatment groups")
+        tray_codes = [code.upper() for group in self.groups for code in group.tray_codes]
+        if len(tray_codes) != len(set(tray_codes)):
+            raise ValueError("a tray can belong to only one group in an experiment")
+        return self
+
+
+class ExperimentGroupRead(ExperimentGroupCreate):
+    id: int
+
+
+class ExperimentRead(BaseModel):
+    id: int
+    name: str
+    crop: str
+    hypothesis: str
+    started_at: datetime
+    ended_at: Optional[datetime]
+    created_by: str
+    groups: list[ExperimentGroupRead]

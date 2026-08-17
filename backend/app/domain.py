@@ -25,6 +25,11 @@ class RuleStatus(str, Enum):
     RETIRED = "retired"
 
 
+class ExperimentGroupKind(str, Enum):
+    CONTROL = "control"
+    TREATMENT = "treatment"
+
+
 @dataclass(frozen=True)
 class ObservationMetrics:
     leaf_area_cm2: float
