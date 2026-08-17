@@ -6,6 +6,7 @@ from app.vision import (
     analyze_green_leaf_area,
     assess_capture_quality,
     decode_image,
+    detect_and_rectify_tray,
     split_tray_grid,
 )
 
@@ -47,6 +48,23 @@ class VisionTests(unittest.TestCase):
         self.assertIn("image_too_blurry", quality.reasons)
         self.assertIn("image_too_dark", quality.reasons)
         self.assertIn("excessive_black_clipping", quality.reasons)
+
+    def test_perspective_tray_is_rectified_to_top_down_view(self):
+        image = np.zeros((300, 400, 3), dtype=np.uint8)
+        polygon = np.array([[80, 40], [340, 70], [310, 260], [50, 230]], dtype=np.int32)
+        cv2.fillConvexPoly(image, polygon, (150, 150, 150))
+        cv2.polylines(image, [polygon], True, (255, 255, 255), 5)
+
+        result = detect_and_rectify_tray(image)
+
+        self.assertGreater(result.source_area_ratio, 0.35)
+        self.assertEqual(len(result.corners), 4)
+        self.assertGreater(result.image.shape[1], result.image.shape[0])
+
+    def test_missing_tray_boundary_is_rejected(self):
+        image = np.full((200, 200, 3), 100, dtype=np.uint8)
+        with self.assertRaisesRegex(ValueError, "tray_boundary_not_found"):
+            detect_and_rectify_tray(image)
 
     def test_tray_grid_uses_one_based_row_major_cells(self):
         image = np.zeros((100, 200, 3), dtype=np.uint8)
