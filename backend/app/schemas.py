@@ -114,6 +114,15 @@ class SensorContextRead(BaseModel):
     ph: Optional[float]
 
 
+class EffectiveCaptureSettingsRead(BaseModel):
+    source: str
+    pixels_per_cm: float
+    margin_ratio: float
+    rectify: bool
+    minimum_tray_area_ratio: float
+    maximum_sensor_age_minutes: float
+
+
 class TrayAnalysisRead(BaseModel):
     capture_id: int
     tray_code: str
@@ -123,6 +132,7 @@ class TrayAnalysisRead(BaseModel):
     quality: CaptureQualityRead
     rectification: TrayRectificationRead
     sensor_context: Optional[SensorContextRead]
+    capture_settings: EffectiveCaptureSettingsRead
 
 
 class SensorReadingCreate(BaseModel):

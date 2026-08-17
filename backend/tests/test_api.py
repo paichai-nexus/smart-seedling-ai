@@ -492,3 +492,43 @@ def test_capture_profile_is_created_and_updated_per_tray(tmp_path: Path):
     assert second.status_code == 200, second.text
     assert profile.json()["pixels_per_cm"] == 43
     assert profile.json()["rectify"] is True
+
+
+def test_tray_analysis_uses_stored_capture_profile(tmp_path: Path):
+    main.repository = Repository(tmp_path / "profile-analysis.db")
+    main.UPLOAD_ROOT = tmp_path / "uploads"
+    image = np.full((100, 100, 3), 80, dtype=np.uint8)
+    image[::10, :] = 120
+    image[:, ::10] = 120
+    image[20:80, 30:70] = (0, 180, 0)
+    success, encoded = cv2.imencode(".png", image)
+    assert success
+
+    with TestClient(main.app) as client:
+        client.post(
+            "/api/v1/trays",
+            json={"code": "TRAY-CP", "crop": "pepper", "rows": 1, "columns": 1},
+        )
+        client.put(
+            "/api/v1/trays/TRAY-CP/capture-profile",
+            json={
+                "pixels_per_cm": 10,
+                "margin_ratio": 0,
+                "rectify": False,
+                "minimum_tray_area_ratio": 0.25,
+                "maximum_sensor_age_minutes": 15,
+                "updated_by": "student-team",
+                "updated_at": "2026-08-24T10:00:00+09:00",
+            },
+        )
+        response = client.post(
+            "/api/v1/trays/TRAY-CP/images/analyze",
+            files={"image": ("tray.png", encoded.tobytes(), "image/png")},
+            data={"captured_at": "2026-08-24T11:00:00+09:00"},
+        )
+
+    assert response.status_code == 201, response.text
+    settings = response.json()["capture_settings"]
+    assert settings["source"] == "profile"
+    assert settings["pixels_per_cm"] == 10
+    assert settings["maximum_sensor_age_minutes"] == 15

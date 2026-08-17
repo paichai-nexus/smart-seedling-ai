@@ -97,6 +97,11 @@ cell margin, perspective-rectification settings, and the allowed sensor matching
 window. Profile changes retain an operator and timezone-aware update timestamp
 so measurement configuration remains auditable.
 
+The full-tray analysis endpoint uses the stored profile whenever form settings
+are omitted. Explicit request values can override individual profile fields, and
+the response reports the effective settings plus whether they came from the
+profile, the request, or a mixture of both.
+
 Run tests:
 
 ```bash
