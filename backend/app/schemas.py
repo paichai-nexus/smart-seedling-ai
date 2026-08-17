@@ -107,8 +107,11 @@ class SensorContextRead(BaseModel):
     source: str
     time_delta_seconds: float
     temperature_c: Optional[float]
+    pressure_hpa: Optional[float] = None
     humidity_percent: Optional[float]
     soil_moisture_percent: Optional[float]
+    soil_moisture_raw_adc: Optional[int] = None
+    soil_moisture_voltage_v: Optional[float] = None
     illuminance_lux: Optional[float]
     ec_ms_cm: Optional[float]
     ph: Optional[float]
@@ -139,8 +142,11 @@ class SensorReadingCreate(BaseModel):
     measured_at: datetime
     source: str = Field(default="manual", min_length=1, max_length=80)
     temperature_c: Optional[float] = Field(default=None, ge=-40, le=85)
+    pressure_hpa: Optional[float] = Field(default=None, ge=300, le=1200)
     humidity_percent: Optional[float] = Field(default=None, ge=0, le=100)
     soil_moisture_percent: Optional[float] = Field(default=None, ge=0, le=100)
+    soil_moisture_raw_adc: Optional[int] = Field(default=None, ge=0, le=32767)
+    soil_moisture_voltage_v: Optional[float] = Field(default=None, ge=0, le=6.144)
     illuminance_lux: Optional[float] = Field(default=None, ge=0)
     ec_ms_cm: Optional[float] = Field(default=None, ge=0, le=20)
     ph: Optional[float] = Field(default=None, ge=0, le=14)
@@ -158,8 +164,11 @@ class SensorReadingCreate(BaseModel):
             value is not None
             for value in (
                 self.temperature_c,
+                self.pressure_hpa,
                 self.humidity_percent,
                 self.soil_moisture_percent,
+                self.soil_moisture_raw_adc,
+                self.soil_moisture_voltage_v,
                 self.illuminance_lux,
                 self.ec_ms_cm,
                 self.ph,

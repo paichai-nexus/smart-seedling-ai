@@ -9,3 +9,4 @@ data/*.db
 uploads/*
 !uploads/.gitkeep
 work/
+outputs/
