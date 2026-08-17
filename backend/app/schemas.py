@@ -200,3 +200,27 @@ class KnowledgeRuleRead(KnowledgeRuleCreate):
     status: RuleStatus
     approved_by: Optional[str]
     approved_at: Optional[datetime]
+
+
+class KnowledgeRuleApproval(BaseModel):
+    approved_by: str = Field(min_length=1, max_length=100)
+    approved_at: datetime
+
+    @field_validator("approved_at")
+    @classmethod
+    def approved_at_requires_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("approved_at must include a timezone offset")
+        return value
+
+
+class ReviewQueueItem(BaseModel):
+    observation_id: int
+    seedling_id: str
+    tray_code: str
+    captured_at: datetime
+    leaf_area_cm2: float
+    discoloration_ratio: float
+    damage_ratio: float
+    confidence: float
+    status: HealthStatus

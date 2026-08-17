@@ -233,3 +233,70 @@ def test_tray_capture_links_nearest_sensor_context(tmp_path: Path):
     with main.repository.connect() as connection:
         link = connection.execute("SELECT * FROM capture_sensor_links").fetchone()
     assert link["sensor_reading_id"] == sensor["id"]
+
+
+def test_expert_review_removes_observation_from_queue(tmp_path: Path):
+    main.repository = Repository(tmp_path / "reviews.db")
+    with TestClient(main.app) as client:
+        client.post(
+            "/api/v1/trays",
+            json={"code": "TRAY-E", "crop": "tomato", "rows": 1, "columns": 1},
+        )
+        observation = client.post(
+            "/api/v1/observations",
+            json={
+                "tray_code": "TRAY-E",
+                "row": 1,
+                "column": 1,
+                "captured_at": "2026-08-21T09:00:00+09:00",
+                "leaf_area_cm2": 10,
+                "discoloration_ratio": 0.25,
+            },
+        ).json()
+        assert len(client.get("/api/v1/reviews/queue").json()) == 1
+        review = client.post(
+            f"/api/v1/observations/{observation['id']}/reviews",
+            json={
+                "reviewer": "Professor Kim",
+                "assessment": "uncertain",
+                "observable_notes": "Yellowing visible on lower leaves",
+                "possible_cause_notes": "Check EC, moisture, and recent fertilization",
+                "reviewed_at": "2026-08-21T10:00:00+09:00",
+            },
+        )
+        queue = client.get("/api/v1/reviews/queue").json()
+
+    assert review.status_code == 201, review.text
+    assert queue == []
+
+
+def test_knowledge_rule_is_hidden_until_expert_approval(tmp_path: Path):
+    main.repository = Repository(tmp_path / "knowledge.db")
+    with TestClient(main.app) as client:
+        draft = client.post(
+            "/api/v1/knowledge-rules",
+            json={
+                "title": "Yellowing with reduced growth",
+                "observable_signals": ["yellowing", "growth_slowdown"],
+                "possible_causes": ["nitrogen deficiency", "overwatering", "low light"],
+                "required_checks": ["EC", "soil moisture", "recent fertilization"],
+                "suggested_actions": ["continue observation", "request expert review"],
+                "safety_note": (
+                    "Do not change fertilizer or pesticide dose without expert approval."
+                ),
+                "created_by": "student-team",
+            },
+        ).json()
+        assert client.get("/api/v1/knowledge-rules").json() == []
+        approval = client.post(
+            f"/api/v1/knowledge-rules/{draft['id']}/approve",
+            json={
+                "approved_by": "Professor Kim",
+                "approved_at": "2026-08-21T11:00:00+09:00",
+            },
+        )
+        rules = client.get("/api/v1/knowledge-rules").json()
+
+    assert approval.status_code == 200, approval.text
+    assert rules[0]["status"] == "approved"
+    assert rules[0]["approved_by"] == "Professor Kim"

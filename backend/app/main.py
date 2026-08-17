@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -16,9 +17,15 @@ from .repository import Repository
 from .schemas import (
     CaptureQualityRead,
     DashboardSummary,
+    ExpertReviewCreate,
+    ExpertReviewRead,
     ImageAnalysisRead,
+    KnowledgeRuleApproval,
+    KnowledgeRuleCreate,
+    KnowledgeRuleRead,
     ObservationCreate,
     ObservationRead,
+    ReviewQueueItem,
     SeedlingHistoryPoint,
     SeedlingLatest,
     SensorContextRead,
@@ -529,3 +536,135 @@ def list_sensor_readings(tray_code: str, limit: int = 100) -> list[SensorReading
             (tray_code, limit),
         ).fetchall()
     return [SensorReadingRead(**dict(row)) for row in rows]
+
+
+@app.get("/api/v1/reviews/queue", response_model=list[ReviewQueueItem])
+def review_queue(limit: int = 100) -> list[ReviewQueueItem]:
+    if not 1 <= limit <= 500:
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
+    query = """
+    WITH latest AS (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY seedling_id ORDER BY captured_at DESC) AS rank
+      FROM observations
+    )
+    SELECT id AS observation_id, seedling_id, tray_code, captured_at, leaf_area_cm2,
+           discoloration_ratio, damage_ratio, confidence, status
+    FROM latest
+    WHERE rank = 1 AND status IN ('warning', 'expert_review')
+      AND NOT EXISTS (SELECT 1 FROM expert_reviews WHERE observation_id = latest.id)
+    ORDER BY captured_at ASC LIMIT ?
+    """
+    with repository.connect() as connection:
+        rows = connection.execute(query, (limit,)).fetchall()
+    return [ReviewQueueItem(**dict(row)) for row in rows]
+
+
+@app.post(
+    "/api/v1/observations/{observation_id}/reviews",
+    response_model=ExpertReviewRead,
+    status_code=201,
+)
+def create_expert_review(
+    observation_id: int,
+    payload: ExpertReviewCreate,
+) -> ExpertReviewRead:
+    with repository.connect() as connection:
+        observation = connection.execute(
+            "SELECT 1 FROM observations WHERE id = ?", (observation_id,)
+        ).fetchone()
+        if observation is None:
+            raise HTTPException(status_code=404, detail="Observation not found")
+        try:
+            cursor = connection.execute(
+                """INSERT INTO expert_reviews(
+                       observation_id, reviewer, assessment, observable_notes,
+                       possible_cause_notes, reviewed_at
+                   ) VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    observation_id,
+                    payload.reviewer,
+                    payload.assessment.value,
+                    payload.observable_notes,
+                    payload.possible_cause_notes,
+                    payload.reviewed_at.isoformat(),
+                ),
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail="Expert review already exists") from exc
+    return ExpertReviewRead(
+        id=cursor.lastrowid,
+        observation_id=observation_id,
+        **payload.model_dump(),
+    )
+
+
+def knowledge_rule_from_row(row) -> KnowledgeRuleRead:
+    return KnowledgeRuleRead(
+        id=row["id"],
+        title=row["title"],
+        observable_signals=json.loads(row["observable_signals_json"]),
+        possible_causes=json.loads(row["possible_causes_json"]),
+        required_checks=json.loads(row["required_checks_json"]),
+        suggested_actions=json.loads(row["suggested_actions_json"]),
+        safety_note=row["safety_note"],
+        status=row["status"],
+        created_by=row["created_by"],
+        approved_by=row["approved_by"],
+        approved_at=row["approved_at"],
+    )
+
+
+@app.post("/api/v1/knowledge-rules", response_model=KnowledgeRuleRead, status_code=201)
+def create_knowledge_rule(payload: KnowledgeRuleCreate) -> KnowledgeRuleRead:
+    with repository.connect() as connection:
+        cursor = connection.execute(
+            """INSERT INTO knowledge_rules(
+                   title, observable_signals_json, possible_causes_json, required_checks_json,
+                   suggested_actions_json, safety_note, status, created_by
+               ) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?)""",
+            (
+                payload.title,
+                json.dumps(payload.observable_signals, ensure_ascii=False),
+                json.dumps(payload.possible_causes, ensure_ascii=False),
+                json.dumps(payload.required_checks, ensure_ascii=False),
+                json.dumps(payload.suggested_actions, ensure_ascii=False),
+                payload.safety_note,
+                payload.created_by,
+            ),
+        )
+        row = connection.execute(
+            "SELECT * FROM knowledge_rules WHERE id = ?", (cursor.lastrowid,)
+        ).fetchone()
+    return knowledge_rule_from_row(row)
+
+
+@app.post(
+    "/api/v1/knowledge-rules/{rule_id}/approve",
+    response_model=KnowledgeRuleRead,
+)
+def approve_knowledge_rule(
+    rule_id: int,
+    payload: KnowledgeRuleApproval,
+) -> KnowledgeRuleRead:
+    with repository.connect() as connection:
+        cursor = connection.execute(
+            """UPDATE knowledge_rules SET status = 'approved', approved_by = ?, approved_at = ?
+               WHERE id = ? AND status = 'draft'""",
+            (payload.approved_by, payload.approved_at.isoformat(), rule_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=409, detail="Rule is missing or not a draft")
+        row = connection.execute(
+            "SELECT * FROM knowledge_rules WHERE id = ?", (rule_id,)
+        ).fetchone()
+    return knowledge_rule_from_row(row)
+
+
+@app.get("/api/v1/knowledge-rules", response_model=list[KnowledgeRuleRead])
+def list_knowledge_rules(include_drafts: bool = False) -> list[KnowledgeRuleRead]:
+    where = "status != 'retired'" if include_drafts else "status = 'approved'"
+    with repository.connect() as connection:
+        rows = connection.execute(
+            f"SELECT * FROM knowledge_rules WHERE {where} ORDER BY id DESC"
+        ).fetchall()
+    return [knowledge_rule_from_row(row) for row in rows]

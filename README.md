@@ -68,6 +68,12 @@ default). The immutable link stores the absolute time difference, allowing
 research exports to combine visual growth measurements with their environmental
 context without silently joining distant measurements.
 
+Observations classified as `warning` or `expert_review` enter an expert review
+queue. A review records observable evidence separately from possible causes.
+Knowledge rules follow a draft-and-approve workflow: unapproved rules are hidden
+from the default recommendation query, and the schema intentionally contains no
+autonomous fertilizer or pesticide dosage field.
+
 Run tests:
 
 ```bash
