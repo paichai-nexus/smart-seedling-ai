@@ -187,3 +187,49 @@ def test_sensor_readings_are_validated_and_returned_latest_first(tmp_path: Path)
     assert empty.status_code == 422
     assert naive_time.status_code == 422
     assert [reading["temperature_c"] for reading in readings] == [25.1, 24.2]
+
+
+def test_tray_capture_links_nearest_sensor_context(tmp_path: Path):
+    main.repository = Repository(tmp_path / "multimodal.db")
+    main.UPLOAD_ROOT = tmp_path / "uploads"
+    image = np.full((100, 100, 3), 80, dtype=np.uint8)
+    image[::10, :] = 120
+    image[:, ::10] = 120
+    image[20:80, 30:70] = (0, 180, 0)
+    success, encoded = cv2.imencode(".png", image)
+    assert success
+
+    with TestClient(main.app) as client:
+        assert (
+            client.post(
+                "/api/v1/trays",
+                json={"code": "TRAY-M", "crop": "tomato", "rows": 1, "columns": 1},
+            ).status_code
+            == 201
+        )
+        sensor = client.post(
+            "/api/v1/trays/TRAY-M/sensor-readings",
+            json={
+                "measured_at": "2026-08-20T09:08:00+09:00",
+                "source": "edge-01",
+                "temperature_c": 24.5,
+                "humidity_percent": 62,
+            },
+        ).json()
+        response = client.post(
+            "/api/v1/trays/TRAY-M/images/analyze",
+            files={"image": ("tray.png", encoded.tobytes(), "image/png")},
+            data={
+                "captured_at": "2026-08-20T09:10:00+09:00",
+                "pixels_per_cm": "10",
+            },
+        )
+
+    assert response.status_code == 201, response.text
+    context = response.json()["sensor_context"]
+    assert context["reading_id"] == sensor["id"]
+    assert context["time_delta_seconds"] == 120
+    assert context["temperature_c"] == 24.5
+    with main.repository.connect() as connection:
+        link = connection.execute("SELECT * FROM capture_sensor_links").fetchone()
+    assert link["sensor_reading_id"] == sensor["id"]

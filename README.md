@@ -62,6 +62,12 @@ nullable independently so an inexpensive edge node can report only the sensors
 it actually has. Timestamps must include a timezone offset and duplicate
 tray/time/source readings are rejected.
 
+When a full-tray image is analyzed, the service links the temporally nearest
+sensor reading from the same tray within a configurable window (30 minutes by
+default). The immutable link stores the absolute time difference, allowing
+research exports to combine visual growth measurements with their environmental
+context without silently joining distant measurements.
+
 Run tests:
 
 ```bash

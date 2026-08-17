@@ -101,6 +101,19 @@ class TrayRectificationRead(BaseModel):
     source_area_ratio: Optional[float]
 
 
+class SensorContextRead(BaseModel):
+    reading_id: int
+    measured_at: datetime
+    source: str
+    time_delta_seconds: float
+    temperature_c: Optional[float]
+    humidity_percent: Optional[float]
+    soil_moisture_percent: Optional[float]
+    illuminance_lux: Optional[float]
+    ec_ms_cm: Optional[float]
+    ph: Optional[float]
+
+
 class TrayAnalysisRead(BaseModel):
     capture_id: int
     tray_code: str
@@ -109,6 +122,7 @@ class TrayAnalysisRead(BaseModel):
     cells: list[TrayCellAnalysis]
     quality: CaptureQualityRead
     rectification: TrayRectificationRead
+    sensor_context: Optional[SensorContextRead]
 
 
 class SensorReadingCreate(BaseModel):

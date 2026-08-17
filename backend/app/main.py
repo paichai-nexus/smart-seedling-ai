@@ -21,6 +21,7 @@ from .schemas import (
     ObservationRead,
     SeedlingHistoryPoint,
     SeedlingLatest,
+    SensorContextRead,
     SensorReadingCreate,
     SensorReadingRead,
     TrayAnalysisRead,
@@ -28,6 +29,7 @@ from .schemas import (
     TrayCreate,
     TrayRectificationRead,
 )
+from .telemetry import nearest_sensor_reading
 from .vision import (
     analyze_green_leaf_area,
     assess_capture_quality,
@@ -233,8 +235,11 @@ async def analyze_tray_image(
     margin_ratio: Annotated[float, Form(ge=0, lt=0.4)] = 0.08,
     rectify: Annotated[bool, Form()] = False,
     minimum_tray_area_ratio: Annotated[float, Form(gt=0, lt=1)] = 0.25,
+    maximum_sensor_age_minutes: Annotated[float, Form(ge=0, le=1440)] = 30,
 ) -> TrayAnalysisRead:
     tray_code = tray_code.upper()
+    if captured_at.tzinfo is None or captured_at.utcoffset() is None:
+        raise HTTPException(status_code=422, detail="captured_at must include a timezone offset")
     if image.content_type not in {"image/jpeg", "image/png"}:
         raise HTTPException(status_code=415, detail="Only JPEG and PNG images are supported")
     content = await image.read(MAX_IMAGE_BYTES + 1)
@@ -244,8 +249,25 @@ async def analyze_tray_image(
         tray = connection.execute(
             "SELECT rows, columns FROM trays WHERE code = ?", (tray_code,)
         ).fetchone()
+        sensor_rows = connection.execute(
+            """SELECT id, measured_at, source, temperature_c, humidity_percent,
+                      soil_moisture_percent, illuminance_lux, ec_ms_cm, ph
+               FROM sensor_readings WHERE tray_code = ?
+               ORDER BY measured_at DESC LIMIT 5000""",
+            (tray_code,),
+        ).fetchall()
     if tray is None:
         raise HTTPException(status_code=404, detail="Tray not found")
+    sensor_match = nearest_sensor_reading(
+        captured_at,
+        sensor_rows,
+        maximum_age_minutes=maximum_sensor_age_minutes,
+    )
+    matched_sensor = (
+        next(row for row in sensor_rows if row["id"] == sensor_match.reading_id)
+        if sensor_match
+        else None
+    )
 
     try:
         decoded = decode_image(content)
@@ -310,6 +332,13 @@ async def analyze_tray_image(
                 "INSERT INTO capture_observations(capture_id, observation_id) VALUES (?, ?)",
                 [(capture_id, observation.id) for observation, _ in results],
             )
+            if sensor_match:
+                connection.execute(
+                    """INSERT INTO capture_sensor_links(
+                           capture_id, sensor_reading_id, time_delta_seconds
+                       ) VALUES (?, ?, ?)""",
+                    (capture_id, sensor_match.reading_id, sensor_match.time_delta_seconds),
+                )
     except Exception as exc:
         destination.unlink(missing_ok=True)
         raise HTTPException(status_code=409, detail="Tray capture already exists") from exc
@@ -324,6 +353,22 @@ async def analyze_tray_image(
             applied=rectification is not None,
             corners=[list(point) for point in rectification.corners] if rectification else [],
             source_area_ratio=rectification.source_area_ratio if rectification else None,
+        ),
+        sensor_context=(
+            SensorContextRead(
+                reading_id=matched_sensor["id"],
+                measured_at=matched_sensor["measured_at"],
+                source=matched_sensor["source"],
+                time_delta_seconds=sensor_match.time_delta_seconds,
+                temperature_c=matched_sensor["temperature_c"],
+                humidity_percent=matched_sensor["humidity_percent"],
+                soil_moisture_percent=matched_sensor["soil_moisture_percent"],
+                illuminance_lux=matched_sensor["illuminance_lux"],
+                ec_ms_cm=matched_sensor["ec_ms_cm"],
+                ph=matched_sensor["ph"],
+            )
+            if matched_sensor and sensor_match
+            else None
         ),
         cells=[
             TrayCellAnalysis(
