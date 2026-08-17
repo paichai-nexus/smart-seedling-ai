@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS sensor_readings (
     tray_code TEXT NOT NULL REFERENCES trays(code),
     measured_at TEXT NOT NULL,
     source TEXT NOT NULL,
+    sensor_id TEXT,
     temperature_c REAL,
     pressure_hpa REAL CHECK(pressure_hpa >= 0),
     humidity_percent REAL CHECK(humidity_percent BETWEEN 0 AND 100),
@@ -150,6 +151,22 @@ CREATE TABLE IF NOT EXISTS capture_profiles (
     updated_by TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS soil_calibrations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tray_code TEXT NOT NULL REFERENCES trays(code),
+    source TEXT NOT NULL,
+    sensor_id TEXT NOT NULL,
+    dry_adc INTEGER NOT NULL CHECK(dry_adc BETWEEN 0 AND 32767),
+    wet_adc INTEGER NOT NULL CHECK(wet_adc BETWEEN 0 AND 32767),
+    calibrated_at TEXT NOT NULL,
+    calibrated_by TEXT NOT NULL,
+    method_notes TEXT NOT NULL,
+    active INTEGER NOT NULL CHECK(active IN (0, 1)) DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK(dry_adc != wet_adc)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS soil_calibration_active_sensor
+ON soil_calibrations(tray_code, source, sensor_id) WHERE active = 1;
 """
 
 
@@ -172,9 +189,12 @@ class Repository:
     def _migrate_sensor_readings(connection: sqlite3.Connection) -> None:
         existing = {row["name"] for row in connection.execute("PRAGMA table_info(sensor_readings)")}
         additions = {
+            "sensor_id": "TEXT",
             "pressure_hpa": "REAL CHECK(pressure_hpa >= 0)",
             "soil_moisture_raw_adc": ("INTEGER CHECK(soil_moisture_raw_adc BETWEEN 0 AND 32767)"),
             "soil_moisture_voltage_v": ("REAL CHECK(soil_moisture_voltage_v BETWEEN 0 AND 6.144)"),
+            "soil_calibration_id": "INTEGER REFERENCES soil_calibrations(id)",
+            "soil_moisture_out_of_range": ("INTEGER CHECK(soil_moisture_out_of_range IN (0, 1))"),
         }
         for column, definition in additions.items():
             if column not in existing:

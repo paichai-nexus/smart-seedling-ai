@@ -48,11 +48,14 @@ from .schemas import (
     SensorContextRead,
     SensorReadingCreate,
     SensorReadingRead,
+    SoilCalibrationCreate,
+    SoilCalibrationRead,
     TrayAnalysisRead,
     TrayCellAnalysis,
     TrayCreate,
     TrayRectificationRead,
 )
+from .soil_calibration import relative_soil_moisture
 from .telemetry import nearest_sensor_reading
 from .vision import (
     analyze_green_leaf_area,
@@ -334,9 +337,10 @@ async def analyze_tray_image(
             "SELECT * FROM capture_profiles WHERE tray_code = ?", (tray_code,)
         ).fetchone()
         sensor_rows = connection.execute(
-            """SELECT id, measured_at, source, temperature_c, pressure_hpa,
+            """SELECT id, measured_at, source, sensor_id, temperature_c, pressure_hpa,
                       humidity_percent, soil_moisture_percent, soil_moisture_raw_adc,
-                      soil_moisture_voltage_v, illuminance_lux, ec_ms_cm, ph
+                      soil_moisture_voltage_v, soil_calibration_id,
+                      soil_moisture_out_of_range, illuminance_lux, ec_ms_cm, ph
                FROM sensor_readings WHERE tray_code = ?
                ORDER BY measured_at DESC LIMIT 5000""",
             (tray_code,),
@@ -477,6 +481,7 @@ async def analyze_tray_image(
                 reading_id=matched_sensor["id"],
                 measured_at=matched_sensor["measured_at"],
                 source=matched_sensor["source"],
+                sensor_id=matched_sensor["sensor_id"],
                 time_delta_seconds=sensor_match.time_delta_seconds,
                 temperature_c=matched_sensor["temperature_c"],
                 pressure_hpa=matched_sensor["pressure_hpa"],
@@ -484,6 +489,12 @@ async def analyze_tray_image(
                 soil_moisture_percent=matched_sensor["soil_moisture_percent"],
                 soil_moisture_raw_adc=matched_sensor["soil_moisture_raw_adc"],
                 soil_moisture_voltage_v=matched_sensor["soil_moisture_voltage_v"],
+                soil_calibration_id=matched_sensor["soil_calibration_id"],
+                soil_moisture_out_of_range=(
+                    bool(matched_sensor["soil_moisture_out_of_range"])
+                    if matched_sensor["soil_moisture_out_of_range"] is not None
+                    else None
+                ),
                 illuminance_lux=matched_sensor["illuminance_lux"],
                 ec_ms_cm=matched_sensor["ec_ms_cm"],
                 ph=matched_sensor["ph"],
@@ -621,6 +632,66 @@ def seedling_history(seedling_id: str, limit: int = 100) -> list[SeedlingHistory
 
 
 @app.post(
+    "/api/v1/trays/{tray_code}/soil-calibrations",
+    response_model=SoilCalibrationRead,
+    status_code=201,
+)
+def create_soil_calibration(
+    tray_code: str,
+    payload: SoilCalibrationCreate,
+) -> SoilCalibrationRead:
+    tray_code = tray_code.upper()
+    with repository.connect() as connection:
+        tray = connection.execute("SELECT 1 FROM trays WHERE code = ?", (tray_code,)).fetchone()
+        if tray is None:
+            raise HTTPException(status_code=404, detail="Tray not found")
+        connection.execute(
+            """UPDATE soil_calibrations SET active = 0
+               WHERE tray_code = ? AND source = ? AND sensor_id = ? AND active = 1""",
+            (tray_code, payload.source, payload.sensor_id),
+        )
+        cursor = connection.execute(
+            """INSERT INTO soil_calibrations(
+                   tray_code, source, sensor_id, dry_adc, wet_adc, calibrated_at,
+                   calibrated_by, method_notes, active
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+            (
+                tray_code,
+                payload.source,
+                payload.sensor_id,
+                payload.dry_adc,
+                payload.wet_adc,
+                payload.calibrated_at.isoformat(),
+                payload.calibrated_by,
+                payload.method_notes,
+            ),
+        )
+    return SoilCalibrationRead(
+        id=cursor.lastrowid,
+        tray_code=tray_code,
+        active=True,
+        **payload.model_dump(),
+    )
+
+
+@app.get(
+    "/api/v1/trays/{tray_code}/soil-calibrations",
+    response_model=list[SoilCalibrationRead],
+)
+def list_soil_calibrations(tray_code: str, active_only: bool = True) -> list[SoilCalibrationRead]:
+    where = "AND active = 1" if active_only else ""
+    with repository.connect() as connection:
+        rows = connection.execute(
+            f"""SELECT id, tray_code, source, sensor_id, dry_adc, wet_adc,
+                       calibrated_at, calibrated_by, method_notes, active
+                FROM soil_calibrations WHERE tray_code = ? {where}
+                ORDER BY calibrated_at DESC""",
+            (tray_code.upper(),),
+        ).fetchall()
+    return [SoilCalibrationRead(**{**dict(row), "active": bool(row["active"])}) for row in rows]
+
+
+@app.post(
     "/api/v1/trays/{tray_code}/sensor-readings",
     response_model=SensorReadingRead,
     status_code=201,
@@ -631,23 +702,46 @@ def create_sensor_reading(tray_code: str, payload: SensorReadingCreate) -> Senso
         tray = connection.execute("SELECT 1 FROM trays WHERE code = ?", (tray_code,)).fetchone()
         if tray is None:
             raise HTTPException(status_code=404, detail="Tray not found")
+        calibration = None
+        if payload.soil_moisture_raw_adc is not None and payload.sensor_id:
+            calibration = connection.execute(
+                """SELECT id, dry_adc, wet_adc FROM soil_calibrations
+                   WHERE tray_code = ? AND source = ? AND sensor_id = ? AND active = 1""",
+                (tray_code, payload.source, payload.sensor_id),
+            ).fetchone()
+        moisture_percent = payload.soil_moisture_percent
+        calibration_id = None
+        out_of_range = None
+        if calibration:
+            estimate = relative_soil_moisture(
+                payload.soil_moisture_raw_adc,
+                calibration["dry_adc"],
+                calibration["wet_adc"],
+            )
+            moisture_percent = estimate.relative_percent
+            calibration_id = calibration["id"]
+            out_of_range = estimate.out_of_calibration_range
         try:
             cursor = connection.execute(
                 """INSERT INTO sensor_readings(
-                       tray_code, measured_at, source, temperature_c, pressure_hpa,
+                       tray_code, measured_at, source, sensor_id, temperature_c, pressure_hpa,
                        humidity_percent, soil_moisture_percent, soil_moisture_raw_adc,
-                       soil_moisture_voltage_v, illuminance_lux, ec_ms_cm, ph
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       soil_moisture_voltage_v, soil_calibration_id,
+                       soil_moisture_out_of_range, illuminance_lux, ec_ms_cm, ph
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     tray_code,
                     payload.measured_at.isoformat(),
                     payload.source,
+                    payload.sensor_id,
                     payload.temperature_c,
                     payload.pressure_hpa,
                     payload.humidity_percent,
-                    payload.soil_moisture_percent,
+                    moisture_percent,
                     payload.soil_moisture_raw_adc,
                     payload.soil_moisture_voltage_v,
+                    calibration_id,
+                    int(out_of_range) if out_of_range is not None else None,
                     payload.illuminance_lux,
                     payload.ec_ms_cm,
                     payload.ph,
@@ -655,7 +749,13 @@ def create_sensor_reading(tray_code: str, payload: SensorReadingCreate) -> Senso
             )
         except Exception as exc:
             raise HTTPException(status_code=409, detail="Sensor reading already exists") from exc
-    return SensorReadingRead(id=cursor.lastrowid, tray_code=tray_code, **payload.model_dump())
+    values = payload.model_dump()
+    values.update(
+        soil_moisture_percent=moisture_percent,
+        soil_calibration_id=calibration_id,
+        soil_moisture_out_of_range=out_of_range,
+    )
+    return SensorReadingRead(id=cursor.lastrowid, tray_code=tray_code, **values)
 
 
 @app.get(
@@ -671,9 +771,10 @@ def list_sensor_readings(tray_code: str, limit: int = 100) -> list[SensorReading
         if tray is None:
             raise HTTPException(status_code=404, detail="Tray not found")
         rows = connection.execute(
-            """SELECT id, tray_code, measured_at, source, temperature_c, pressure_hpa,
+            """SELECT id, tray_code, measured_at, source, sensor_id, temperature_c, pressure_hpa,
                       humidity_percent, soil_moisture_percent, soil_moisture_raw_adc,
-                      soil_moisture_voltage_v, illuminance_lux, ec_ms_cm, ph
+                      soil_moisture_voltage_v, soil_calibration_id,
+                      soil_moisture_out_of_range, illuminance_lux, ec_ms_cm, ph
                FROM sensor_readings WHERE tray_code = ?
                ORDER BY measured_at DESC LIMIT ?""",
             (tray_code, limit),
@@ -1040,6 +1141,8 @@ EXPERIMENT_EXPORT_FIELDS = [
     "soil_moisture_percent",
     "soil_moisture_raw_adc",
     "soil_moisture_voltage_v",
+    "soil_calibration_id",
+    "soil_moisture_out_of_range",
     "illuminance_lux",
     "ec_ms_cm",
     "ph",
@@ -1057,7 +1160,8 @@ def export_experiment_csv(experiment_id: int) -> StreamingResponse:
            o.damage_ratio, o.status AS ai_status,
            sr.temperature_c, sr.pressure_hpa, sr.humidity_percent,
            sr.soil_moisture_percent, sr.soil_moisture_raw_adc,
-           sr.soil_moisture_voltage_v, sr.illuminance_lux, sr.ec_ms_cm, sr.ph,
+           sr.soil_moisture_voltage_v, sr.soil_calibration_id,
+           sr.soil_moisture_out_of_range, sr.illuminance_lux, sr.ec_ms_cm, sr.ph,
            csl.time_delta_seconds,
            er.assessment AS expert_assessment
     FROM experiments e

@@ -66,6 +66,11 @@ BME280 pressure and SEN0193 raw ADS1115 counts/voltage are preserved alongside
 derived values. Raw soil readings are the measurement source of truth; a
 percentage is calibration-dependent and must not be presented as absolute VWC.
 
+Each SEN0193 sensor can register dry/wet ADC references with sensor identity,
+method notes, operator, and timestamp. Ingestion uses the active calibration to
+derive a clamped relative percentage and preserves an out-of-range flag plus the
+calibration record ID for reproducibility.
+
 When a full-tray image is analyzed, the service links the temporally nearest
 sensor reading from the same tray within a configurable window (30 minutes by
 default). The immutable link stores the absolute time difference, allowing
