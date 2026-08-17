@@ -42,3 +42,14 @@ class DashboardSummary(BaseModel):
     warning: int
     expert_review: int
     latest_capture_at: Optional[datetime]
+
+
+class ImageAnalysisRead(BaseModel):
+    seedling_id: str
+    observation_id: int
+    image_path: str
+    leaf_area_cm2: float
+    green_pixel_count: int
+    coverage_ratio: float
+    analysis_confidence: float
+    status: HealthStatus

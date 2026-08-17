@@ -2,22 +2,36 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
+from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from typing_extensions import Annotated
 
 from .domain import ObservationMetrics, classify_status, growth_rate_percent, stable_seedling_id
 from .repository import Repository
-from .schemas import DashboardSummary, ObservationCreate, ObservationRead, TrayCreate
+from .schemas import (
+    DashboardSummary,
+    ImageAnalysisRead,
+    ObservationCreate,
+    ObservationRead,
+    TrayCreate,
+)
+from .vision import analyze_green_leaf_area, decode_image
 
 ROOT = Path(__file__).resolve().parents[2]
 repository = Repository(os.getenv("SMART_SEEDLING_DB", str(ROOT / "smart_seedling.db")))
+UPLOAD_ROOT = Path(os.getenv("SMART_SEEDLING_UPLOADS", str(ROOT / "uploads")))
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     repository.initialize()
+    UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
     yield
 
 
@@ -113,6 +127,58 @@ def create_observation(payload: ObservationCreate) -> ObservationRead:
         status=status,
         growth_rate_percent=growth,
         **payload.model_dump(),
+    )
+
+
+@app.post("/api/v1/images/analyze", response_model=ImageAnalysisRead, status_code=201)
+async def analyze_image(
+    image: Annotated[UploadFile, File()],
+    tray_code: Annotated[str, Form()],
+    row: Annotated[int, Form(ge=1)],
+    column: Annotated[int, Form(ge=1)],
+    captured_at: Annotated[datetime, Form()],
+    pixels_per_cm: Annotated[float, Form(gt=0)],
+) -> ImageAnalysisRead:
+    if image.content_type not in {"image/jpeg", "image/png"}:
+        raise HTTPException(status_code=415, detail="Only JPEG and PNG images are supported")
+    content = await image.read(MAX_IMAGE_BYTES + 1)
+    if len(content) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image exceeds the 10 MB limit")
+    try:
+        analysis = analyze_green_leaf_area(decode_image(content), pixels_per_cm)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    observation = create_observation(
+        ObservationCreate(
+            tray_code=tray_code,
+            row=row,
+            column=column,
+            captured_at=captured_at,
+            leaf_area_cm2=analysis.leaf_area_cm2,
+            confidence=analysis.confidence,
+        )
+    )
+    extension = ".png" if image.content_type == "image/png" else ".jpg"
+    relative_path = f"{tray_code.upper()}/{captured_at.date().isoformat()}/{uuid4().hex}{extension}"
+    destination = UPLOAD_ROOT / relative_path
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(content)
+    with repository.connect() as connection:
+        connection.execute(
+            """INSERT INTO image_assets(observation_id, relative_path, sha256, mime_type)
+               VALUES (?, ?, ?, ?)""",
+            (observation.id, relative_path, sha256(content).hexdigest(), image.content_type),
+        )
+    return ImageAnalysisRead(
+        seedling_id=observation.seedling_id,
+        observation_id=observation.id,
+        image_path=relative_path,
+        leaf_area_cm2=analysis.leaf_area_cm2,
+        green_pixel_count=analysis.green_pixel_count,
+        coverage_ratio=analysis.coverage_ratio,
+        analysis_confidence=analysis.confidence,
+        status=observation.status,
     )
 
 

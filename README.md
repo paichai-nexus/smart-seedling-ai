@@ -15,6 +15,7 @@ The first vertical slice provides:
 - time-series observations for leaf area, discoloration, and sensor readings;
 - growth-rate and relative-growth calculations;
 - conservative `healthy`, `warning`, and `expert_review` status assignment;
+- calibrated JPEG/PNG upload with an auditable OpenCV HSV leaf-area baseline;
 - a FastAPI service with SQLite persistence and a simple research dashboard.
 
 ## Quick start
@@ -30,6 +31,11 @@ uvicorn app.main:app --app-dir backend --reload
 
 Open `http://127.0.0.1:8000/docs` for the API and
 `http://127.0.0.1:8000/dashboard` for the dashboard.
+
+The image endpoint requires a measured `pixels_per_cm` value from the fixed
+camera setup. This converts projected green pixels to square centimetres; it is
+not a biological diagnosis. Use `POST /api/v1/images/analyze` in the API docs to
+upload a JPEG or PNG and create the corresponding observation.
 
 Run tests:
 
