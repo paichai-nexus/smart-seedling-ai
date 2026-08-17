@@ -1,0 +1,16 @@
+[Unit]
+Description=Smart Seedling Raspberry Pi Edge Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/opt/smart-seedling-ai
+EnvironmentFile=/etc/smart-seedling-edge.env
+ExecStart=/opt/smart-seedling-ai/.venv/bin/python -m edge.agent.main --server-url ${SERVER_URL} --tray-code ${TRAY_CODE} --timezone ${TIMEZONE} --interval-seconds ${CAPTURE_INTERVAL_SECONDS} --data-directory /var/lib/smart-seedling-edge
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
