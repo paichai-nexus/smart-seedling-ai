@@ -112,6 +112,8 @@ class SensorContextRead(BaseModel):
     soil_moisture_percent: Optional[float]
     soil_moisture_raw_adc: Optional[int] = None
     soil_moisture_voltage_v: Optional[float] = None
+    soil_calibration_id: Optional[int] = None
+    soil_moisture_out_of_range: Optional[bool] = None
     illuminance_lux: Optional[float]
     ec_ms_cm: Optional[float]
     ph: Optional[float]
@@ -147,6 +149,8 @@ class SensorReadingCreate(BaseModel):
     soil_moisture_percent: Optional[float] = Field(default=None, ge=0, le=100)
     soil_moisture_raw_adc: Optional[int] = Field(default=None, ge=0, le=32767)
     soil_moisture_voltage_v: Optional[float] = Field(default=None, ge=0, le=6.144)
+    soil_calibration_id: Optional[int] = None
+    soil_moisture_out_of_range: Optional[bool] = None
     illuminance_lux: Optional[float] = Field(default=None, ge=0)
     ec_ms_cm: Optional[float] = Field(default=None, ge=0, le=20)
     ph: Optional[float] = Field(default=None, ge=0, le=14)
@@ -182,6 +186,30 @@ class SensorReadingCreate(BaseModel):
 class SensorReadingRead(SensorReadingCreate):
     id: int
     tray_code: str
+
+
+class SoilCalibrationCreate(BaseModel):
+    source: str = Field(min_length=1, max_length=80)
+    sensor_id: str = Field(min_length=1, max_length=100)
+    dry_adc: int = Field(ge=0, le=32767)
+    wet_adc: int = Field(ge=0, le=32767)
+    calibrated_at: datetime
+    calibrated_by: str = Field(min_length=1, max_length=100)
+    method_notes: str = Field(min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_calibration(self):
+        if self.dry_adc == self.wet_adc:
+            raise ValueError("dry_adc and wet_adc must differ")
+        if self.calibrated_at.tzinfo is None or self.calibrated_at.utcoffset() is None:
+            raise ValueError("calibrated_at must include a timezone offset")
+        return self
+
+
+class SoilCalibrationRead(SoilCalibrationCreate):
+    id: int
+    tray_code: str
+    active: bool
 
 
 class ExpertReviewCreate(BaseModel):
