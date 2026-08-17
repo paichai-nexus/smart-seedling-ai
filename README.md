@@ -62,6 +62,10 @@ nullable independently so an inexpensive edge node can report only the sensors
 it actually has. Timestamps must include a timezone offset and duplicate
 tray/time/source readings are rejected.
 
+BME280 pressure and SEN0193 raw ADS1115 counts/voltage are preserved alongside
+derived values. Raw soil readings are the measurement source of truth; a
+percentage is calibration-dependent and must not be presented as absolute VWC.
+
 When a full-tray image is analyzed, the service links the temporally nearest
 sensor reading from the same tray within a configurable window (30 minutes by
 default). The immutable link stores the absolute time difference, allowing
@@ -92,6 +96,16 @@ mean, median, population standard deviation, minimum, and maximum. These are
 descriptive statistics; the dashboard explicitly avoids claiming significance
 or causality.
 
+Each tray can store a fixed-camera capture profile containing scale calibration,
+cell margin, perspective-rectification settings, and the allowed sensor matching
+window. Profile changes retain an operator and timezone-aware update timestamp
+so measurement configuration remains auditable.
+
+The full-tray analysis endpoint uses the stored profile whenever form settings
+are omitted. Explicit request values can override individual profile fields, and
+the response reports the effective settings plus whether they came from the
+profile, the request, or a mixture of both.
+
 Run tests:
 
 ```bash
@@ -105,7 +119,14 @@ backend/app/       API, domain rules, and SQLite repository
 backend/tests/     dependency-free domain tests
 frontend/          static research dashboard
 docs/              architecture and research protocol
+hardware/          BOM, official datasheet manifest, and hardware baseline
 ```
+
+## Hardware references
+
+- [Hardware baseline](hardware/README.md)
+- [Official datasheet manifest](hardware/Datasheet_Manifest_v1.md)
+- [Editable BOM](hardware/Paichai_NEXUS_Smart_Seedling_AI_BOM_v1.1.xlsx)
 
 ## Next development milestone
 

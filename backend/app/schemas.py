@@ -107,11 +107,23 @@ class SensorContextRead(BaseModel):
     source: str
     time_delta_seconds: float
     temperature_c: Optional[float]
+    pressure_hpa: Optional[float] = None
     humidity_percent: Optional[float]
     soil_moisture_percent: Optional[float]
+    soil_moisture_raw_adc: Optional[int] = None
+    soil_moisture_voltage_v: Optional[float] = None
     illuminance_lux: Optional[float]
     ec_ms_cm: Optional[float]
     ph: Optional[float]
+
+
+class EffectiveCaptureSettingsRead(BaseModel):
+    source: str
+    pixels_per_cm: float
+    margin_ratio: float
+    rectify: bool
+    minimum_tray_area_ratio: float
+    maximum_sensor_age_minutes: float
 
 
 class TrayAnalysisRead(BaseModel):
@@ -123,14 +135,18 @@ class TrayAnalysisRead(BaseModel):
     quality: CaptureQualityRead
     rectification: TrayRectificationRead
     sensor_context: Optional[SensorContextRead]
+    capture_settings: EffectiveCaptureSettingsRead
 
 
 class SensorReadingCreate(BaseModel):
     measured_at: datetime
     source: str = Field(default="manual", min_length=1, max_length=80)
     temperature_c: Optional[float] = Field(default=None, ge=-40, le=85)
+    pressure_hpa: Optional[float] = Field(default=None, ge=300, le=1200)
     humidity_percent: Optional[float] = Field(default=None, ge=0, le=100)
     soil_moisture_percent: Optional[float] = Field(default=None, ge=0, le=100)
+    soil_moisture_raw_adc: Optional[int] = Field(default=None, ge=0, le=32767)
+    soil_moisture_voltage_v: Optional[float] = Field(default=None, ge=0, le=6.144)
     illuminance_lux: Optional[float] = Field(default=None, ge=0)
     ec_ms_cm: Optional[float] = Field(default=None, ge=0, le=20)
     ph: Optional[float] = Field(default=None, ge=0, le=14)
@@ -148,8 +164,11 @@ class SensorReadingCreate(BaseModel):
             value is not None
             for value in (
                 self.temperature_c,
+                self.pressure_hpa,
                 self.humidity_percent,
                 self.soil_moisture_percent,
+                self.soil_moisture_raw_adc,
+                self.soil_moisture_voltage_v,
                 self.illuminance_lux,
                 self.ec_ms_cm,
                 self.ph,
@@ -328,3 +347,24 @@ class ExperimentComparisonRead(BaseModel):
     experiment_name: str
     groups: list[GroupGrowthSummaryRead]
     interpretation_note: str
+
+
+class CaptureProfileUpsert(BaseModel):
+    pixels_per_cm: float = Field(gt=0)
+    margin_ratio: float = Field(default=0.08, ge=0, lt=0.4)
+    rectify: bool = False
+    minimum_tray_area_ratio: float = Field(default=0.25, gt=0, lt=1)
+    maximum_sensor_age_minutes: float = Field(default=30, ge=0, le=1440)
+    updated_by: str = Field(min_length=1, max_length=100)
+    updated_at: datetime
+
+    @field_validator("updated_at")
+    @classmethod
+    def updated_at_requires_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("updated_at must include a timezone offset")
+        return value
+
+
+class CaptureProfileRead(CaptureProfileUpsert):
+    tray_code: str

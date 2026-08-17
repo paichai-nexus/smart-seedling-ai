@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
+from typing import Optional
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -19,8 +20,11 @@ from .experiments import summarize_group_growth
 from .recommendations import derive_observable_signals, rank_knowledge_rules
 from .repository import Repository
 from .schemas import (
+    CaptureProfileRead,
+    CaptureProfileUpsert,
     CaptureQualityRead,
     DashboardSummary,
+    EffectiveCaptureSettingsRead,
     ExperimentComparisonRead,
     ExperimentCreate,
     ExperimentGroupRead,
@@ -111,6 +115,63 @@ def create_tray(payload: TrayCreate) -> dict[str, str]:
         except Exception as exc:
             raise HTTPException(status_code=409, detail="Tray already exists") from exc
     return {"code": payload.code.upper()}
+
+
+@app.put(
+    "/api/v1/trays/{tray_code}/capture-profile",
+    response_model=CaptureProfileRead,
+)
+def upsert_capture_profile(
+    tray_code: str,
+    payload: CaptureProfileUpsert,
+) -> CaptureProfileRead:
+    tray_code = tray_code.upper()
+    with repository.connect() as connection:
+        tray = connection.execute("SELECT 1 FROM trays WHERE code = ?", (tray_code,)).fetchone()
+        if tray is None:
+            raise HTTPException(status_code=404, detail="Tray not found")
+        connection.execute(
+            """INSERT INTO capture_profiles(
+                   tray_code, pixels_per_cm, margin_ratio, rectify,
+                   minimum_tray_area_ratio, maximum_sensor_age_minutes,
+                   updated_by, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(tray_code) DO UPDATE SET
+                   pixels_per_cm = excluded.pixels_per_cm,
+                   margin_ratio = excluded.margin_ratio,
+                   rectify = excluded.rectify,
+                   minimum_tray_area_ratio = excluded.minimum_tray_area_ratio,
+                   maximum_sensor_age_minutes = excluded.maximum_sensor_age_minutes,
+                   updated_by = excluded.updated_by,
+                   updated_at = excluded.updated_at""",
+            (
+                tray_code,
+                payload.pixels_per_cm,
+                payload.margin_ratio,
+                int(payload.rectify),
+                payload.minimum_tray_area_ratio,
+                payload.maximum_sensor_age_minutes,
+                payload.updated_by,
+                payload.updated_at.isoformat(),
+            ),
+        )
+    return CaptureProfileRead(tray_code=tray_code, **payload.model_dump())
+
+
+@app.get(
+    "/api/v1/trays/{tray_code}/capture-profile",
+    response_model=CaptureProfileRead,
+)
+def get_capture_profile(tray_code: str) -> CaptureProfileRead:
+    with repository.connect() as connection:
+        row = connection.execute(
+            "SELECT * FROM capture_profiles WHERE tray_code = ?", (tray_code.upper(),)
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Capture profile not found")
+    values = dict(row)
+    values["rectify"] = bool(values["rectify"])
+    return CaptureProfileRead(**values)
 
 
 @app.post("/api/v1/observations", response_model=ObservationRead, status_code=201)
@@ -251,11 +312,11 @@ async def analyze_tray_image(
     tray_code: str,
     image: Annotated[UploadFile, File()],
     captured_at: Annotated[datetime, Form()],
-    pixels_per_cm: Annotated[float, Form(gt=0)],
-    margin_ratio: Annotated[float, Form(ge=0, lt=0.4)] = 0.08,
-    rectify: Annotated[bool, Form()] = False,
-    minimum_tray_area_ratio: Annotated[float, Form(gt=0, lt=1)] = 0.25,
-    maximum_sensor_age_minutes: Annotated[float, Form(ge=0, le=1440)] = 30,
+    pixels_per_cm: Annotated[Optional[float], Form(gt=0)] = None,
+    margin_ratio: Annotated[Optional[float], Form(ge=0, lt=0.4)] = None,
+    rectify: Annotated[Optional[bool], Form()] = None,
+    minimum_tray_area_ratio: Annotated[Optional[float], Form(gt=0, lt=1)] = None,
+    maximum_sensor_age_minutes: Annotated[Optional[float], Form(ge=0, le=1440)] = None,
 ) -> TrayAnalysisRead:
     tray_code = tray_code.upper()
     if captured_at.tzinfo is None or captured_at.utcoffset() is None:
@@ -269,19 +330,51 @@ async def analyze_tray_image(
         tray = connection.execute(
             "SELECT rows, columns FROM trays WHERE code = ?", (tray_code,)
         ).fetchone()
+        profile = connection.execute(
+            "SELECT * FROM capture_profiles WHERE tray_code = ?", (tray_code,)
+        ).fetchone()
         sensor_rows = connection.execute(
-            """SELECT id, measured_at, source, temperature_c, humidity_percent,
-                      soil_moisture_percent, illuminance_lux, ec_ms_cm, ph
+            """SELECT id, measured_at, source, temperature_c, pressure_hpa,
+                      humidity_percent, soil_moisture_percent, soil_moisture_raw_adc,
+                      soil_moisture_voltage_v, illuminance_lux, ec_ms_cm, ph
                FROM sensor_readings WHERE tray_code = ?
                ORDER BY measured_at DESC LIMIT 5000""",
             (tray_code,),
         ).fetchall()
     if tray is None:
         raise HTTPException(status_code=404, detail="Tray not found")
+    if pixels_per_cm is None and profile is None:
+        raise HTTPException(
+            status_code=422,
+            detail="pixels_per_cm is required when no capture profile exists",
+        )
+    effective_pixels_per_cm = (
+        pixels_per_cm if pixels_per_cm is not None else profile["pixels_per_cm"]
+    )
+    effective_margin_ratio = (
+        margin_ratio if margin_ratio is not None else profile["margin_ratio"] if profile else 0.08
+    )
+    effective_rectify = (
+        rectify if rectify is not None else bool(profile["rectify"]) if profile else False
+    )
+    effective_minimum_tray_area = (
+        minimum_tray_area_ratio
+        if minimum_tray_area_ratio is not None
+        else profile["minimum_tray_area_ratio"]
+        if profile
+        else 0.25
+    )
+    effective_maximum_sensor_age = (
+        maximum_sensor_age_minutes
+        if maximum_sensor_age_minutes is not None
+        else profile["maximum_sensor_age_minutes"]
+        if profile
+        else 30
+    )
     sensor_match = nearest_sensor_reading(
         captured_at,
         sensor_rows,
-        maximum_age_minutes=maximum_sensor_age_minutes,
+        maximum_age_minutes=effective_maximum_sensor_age,
     )
     matched_sensor = (
         next(row for row in sensor_rows if row["id"] == sensor_match.reading_id)
@@ -300,13 +393,18 @@ async def analyze_tray_image(
                     "quality": quality_response(quality).model_dump(),
                 },
             )
-        if rectify:
-            rectification = detect_and_rectify_tray(decoded, minimum_tray_area_ratio)
+        if effective_rectify:
+            rectification = detect_and_rectify_tray(decoded, effective_minimum_tray_area)
             analysis_image = rectification.image
         else:
             rectification = None
             analysis_image = decoded
-        cells = split_tray_grid(analysis_image, tray["rows"], tray["columns"], margin_ratio)
+        cells = split_tray_grid(
+            analysis_image,
+            tray["rows"],
+            tray["columns"],
+            effective_margin_ratio,
+        )
     except HTTPException:
         raise
     except ValueError as exc:
@@ -314,7 +412,7 @@ async def analyze_tray_image(
 
     results = []
     for cell in cells:
-        analysis = analyze_green_leaf_area(cell.image, pixels_per_cm)
+        analysis = analyze_green_leaf_area(cell.image, effective_pixels_per_cm)
         observation = create_observation(
             ObservationCreate(
                 tray_code=tray_code,
@@ -344,7 +442,7 @@ async def analyze_tray_image(
                     relative_path,
                     sha256(content).hexdigest(),
                     image.content_type,
-                    pixels_per_cm,
+                    effective_pixels_per_cm,
                 ),
             )
             capture_id = cursor.lastrowid
@@ -381,14 +479,41 @@ async def analyze_tray_image(
                 source=matched_sensor["source"],
                 time_delta_seconds=sensor_match.time_delta_seconds,
                 temperature_c=matched_sensor["temperature_c"],
+                pressure_hpa=matched_sensor["pressure_hpa"],
                 humidity_percent=matched_sensor["humidity_percent"],
                 soil_moisture_percent=matched_sensor["soil_moisture_percent"],
+                soil_moisture_raw_adc=matched_sensor["soil_moisture_raw_adc"],
+                soil_moisture_voltage_v=matched_sensor["soil_moisture_voltage_v"],
                 illuminance_lux=matched_sensor["illuminance_lux"],
                 ec_ms_cm=matched_sensor["ec_ms_cm"],
                 ph=matched_sensor["ph"],
             )
             if matched_sensor and sensor_match
             else None
+        ),
+        capture_settings=EffectiveCaptureSettingsRead(
+            source=(
+                "profile_with_request_overrides"
+                if profile
+                and any(
+                    value is not None
+                    for value in (
+                        pixels_per_cm,
+                        margin_ratio,
+                        rectify,
+                        minimum_tray_area_ratio,
+                        maximum_sensor_age_minutes,
+                    )
+                )
+                else "profile"
+                if profile
+                else "request"
+            ),
+            pixels_per_cm=effective_pixels_per_cm,
+            margin_ratio=effective_margin_ratio,
+            rectify=effective_rectify,
+            minimum_tray_area_ratio=effective_minimum_tray_area,
+            maximum_sensor_age_minutes=effective_maximum_sensor_age,
         ),
         cells=[
             TrayCellAnalysis(
@@ -509,16 +634,20 @@ def create_sensor_reading(tray_code: str, payload: SensorReadingCreate) -> Senso
         try:
             cursor = connection.execute(
                 """INSERT INTO sensor_readings(
-                       tray_code, measured_at, source, temperature_c, humidity_percent,
-                       soil_moisture_percent, illuminance_lux, ec_ms_cm, ph
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       tray_code, measured_at, source, temperature_c, pressure_hpa,
+                       humidity_percent, soil_moisture_percent, soil_moisture_raw_adc,
+                       soil_moisture_voltage_v, illuminance_lux, ec_ms_cm, ph
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     tray_code,
                     payload.measured_at.isoformat(),
                     payload.source,
                     payload.temperature_c,
+                    payload.pressure_hpa,
                     payload.humidity_percent,
                     payload.soil_moisture_percent,
+                    payload.soil_moisture_raw_adc,
+                    payload.soil_moisture_voltage_v,
                     payload.illuminance_lux,
                     payload.ec_ms_cm,
                     payload.ph,
@@ -542,8 +671,9 @@ def list_sensor_readings(tray_code: str, limit: int = 100) -> list[SensorReading
         if tray is None:
             raise HTTPException(status_code=404, detail="Tray not found")
         rows = connection.execute(
-            """SELECT id, tray_code, measured_at, source, temperature_c,
-                      humidity_percent, soil_moisture_percent, illuminance_lux, ec_ms_cm, ph
+            """SELECT id, tray_code, measured_at, source, temperature_c, pressure_hpa,
+                      humidity_percent, soil_moisture_percent, soil_moisture_raw_adc,
+                      soil_moisture_voltage_v, illuminance_lux, ec_ms_cm, ph
                FROM sensor_readings WHERE tray_code = ?
                ORDER BY measured_at DESC LIMIT ?""",
             (tray_code, limit),
@@ -905,8 +1035,11 @@ EXPERIMENT_EXPORT_FIELDS = [
     "damage_ratio",
     "ai_status",
     "temperature_c",
+    "pressure_hpa",
     "humidity_percent",
     "soil_moisture_percent",
+    "soil_moisture_raw_adc",
+    "soil_moisture_voltage_v",
     "illuminance_lux",
     "ec_ms_cm",
     "ph",
@@ -922,8 +1055,10 @@ def export_experiment_csv(experiment_id: int) -> StreamingResponse:
            g.name AS group_name, g.kind AS group_kind, et.tray_code,
            o.seedling_id, o.captured_at, o.leaf_area_cm2, o.discoloration_ratio,
            o.damage_ratio, o.status AS ai_status,
-           sr.temperature_c, sr.humidity_percent, sr.soil_moisture_percent,
-           sr.illuminance_lux, sr.ec_ms_cm, sr.ph, csl.time_delta_seconds,
+           sr.temperature_c, sr.pressure_hpa, sr.humidity_percent,
+           sr.soil_moisture_percent, sr.soil_moisture_raw_adc,
+           sr.soil_moisture_voltage_v, sr.illuminance_lux, sr.ec_ms_cm, sr.ph,
+           csl.time_delta_seconds,
            er.assessment AS expert_assessment
     FROM experiments e
     JOIN experiment_groups g ON g.experiment_id = e.id

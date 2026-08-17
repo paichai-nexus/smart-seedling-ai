@@ -60,17 +60,21 @@ CREATE TABLE IF NOT EXISTS sensor_readings (
     measured_at TEXT NOT NULL,
     source TEXT NOT NULL,
     temperature_c REAL,
+    pressure_hpa REAL CHECK(pressure_hpa >= 0),
     humidity_percent REAL CHECK(humidity_percent BETWEEN 0 AND 100),
     soil_moisture_percent REAL CHECK(soil_moisture_percent BETWEEN 0 AND 100),
+    soil_moisture_raw_adc INTEGER CHECK(soil_moisture_raw_adc BETWEEN 0 AND 32767),
+    soil_moisture_voltage_v REAL CHECK(soil_moisture_voltage_v BETWEEN 0 AND 6.144),
     illuminance_lux REAL CHECK(illuminance_lux >= 0),
     ec_ms_cm REAL CHECK(ec_ms_cm >= 0),
     ph REAL CHECK(ph BETWEEN 0 AND 14),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(tray_code, measured_at, source),
     CHECK(
-        temperature_c IS NOT NULL OR humidity_percent IS NOT NULL OR
-        soil_moisture_percent IS NOT NULL OR illuminance_lux IS NOT NULL OR
-        ec_ms_cm IS NOT NULL OR ph IS NOT NULL
+        temperature_c IS NOT NULL OR pressure_hpa IS NOT NULL OR
+        humidity_percent IS NOT NULL OR soil_moisture_percent IS NOT NULL OR
+        soil_moisture_raw_adc IS NOT NULL OR soil_moisture_voltage_v IS NOT NULL OR
+        illuminance_lux IS NOT NULL OR ec_ms_cm IS NOT NULL OR ph IS NOT NULL
     )
 );
 CREATE INDEX IF NOT EXISTS sensor_readings_tray_time
@@ -134,6 +138,18 @@ CREATE TABLE IF NOT EXISTS experiment_trays (
     assigned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(experiment_id, tray_code)
 );
+CREATE TABLE IF NOT EXISTS capture_profiles (
+    tray_code TEXT PRIMARY KEY REFERENCES trays(code),
+    pixels_per_cm REAL NOT NULL CHECK(pixels_per_cm > 0),
+    margin_ratio REAL NOT NULL CHECK(margin_ratio >= 0 AND margin_ratio < 0.4),
+    rectify INTEGER NOT NULL CHECK(rectify IN (0, 1)),
+    minimum_tray_area_ratio REAL NOT NULL
+        CHECK(minimum_tray_area_ratio > 0 AND minimum_tray_area_ratio < 1),
+    maximum_sensor_age_minutes REAL NOT NULL
+        CHECK(maximum_sensor_age_minutes >= 0 AND maximum_sensor_age_minutes <= 1440),
+    updated_by TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -150,3 +166,16 @@ class Repository:
     def initialize(self) -> None:
         with self.connect() as connection:
             connection.executescript(SCHEMA)
+            self._migrate_sensor_readings(connection)
+
+    @staticmethod
+    def _migrate_sensor_readings(connection: sqlite3.Connection) -> None:
+        existing = {row["name"] for row in connection.execute("PRAGMA table_info(sensor_readings)")}
+        additions = {
+            "pressure_hpa": "REAL CHECK(pressure_hpa >= 0)",
+            "soil_moisture_raw_adc": ("INTEGER CHECK(soil_moisture_raw_adc BETWEEN 0 AND 32767)"),
+            "soil_moisture_voltage_v": ("REAL CHECK(soil_moisture_voltage_v BETWEEN 0 AND 6.144)"),
+        }
+        for column, definition in additions.items():
+            if column not in existing:
+                connection.execute(f"ALTER TABLE sensor_readings ADD COLUMN {column} {definition}")

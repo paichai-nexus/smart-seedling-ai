@@ -174,8 +174,11 @@ def test_sensor_readings_are_validated_and_returned_latest_first(tmp_path: Path)
                     "measured_at": f"2026-08-20T{hour:02d}:00:00+09:00",
                     "source": "edge-01",
                     "temperature_c": temperature,
+                    "pressure_hpa": 1008.4,
                     "humidity_percent": 61,
                     "soil_moisture_percent": 43,
+                    "soil_moisture_raw_adc": 14520,
+                    "soil_moisture_voltage_v": 1.82,
                     "illuminance_lux": 12000,
                     "ec_ms_cm": 1.7,
                     "ph": 6.2,
@@ -187,6 +190,9 @@ def test_sensor_readings_are_validated_and_returned_latest_first(tmp_path: Path)
     assert empty.status_code == 422
     assert naive_time.status_code == 422
     assert [reading["temperature_c"] for reading in readings] == [25.1, 24.2]
+    assert readings[0]["pressure_hpa"] == 1008.4
+    assert readings[0]["soil_moisture_raw_adc"] == 14520
+    assert readings[0]["soil_moisture_voltage_v"] == 1.82
 
 
 def test_tray_capture_links_nearest_sensor_context(tmp_path: Path):
@@ -213,7 +219,10 @@ def test_tray_capture_links_nearest_sensor_context(tmp_path: Path):
                 "measured_at": "2026-08-20T09:08:00+09:00",
                 "source": "edge-01",
                 "temperature_c": 24.5,
+                "pressure_hpa": 1007.9,
                 "humidity_percent": 62,
+                "soil_moisture_raw_adc": 15001,
+                "soil_moisture_voltage_v": 1.88,
             },
         ).json()
         response = client.post(
@@ -230,6 +239,8 @@ def test_tray_capture_links_nearest_sensor_context(tmp_path: Path):
     assert context["reading_id"] == sensor["id"]
     assert context["time_delta_seconds"] == 120
     assert context["temperature_c"] == 24.5
+    assert context["pressure_hpa"] == 1007.9
+    assert context["soil_moisture_raw_adc"] == 15001
     with main.repository.connect() as connection:
         link = connection.execute("SELECT * FROM capture_sensor_links").fetchone()
     assert link["sensor_reading_id"] == sensor["id"]
@@ -457,3 +468,78 @@ def test_experiment_comparison_reports_group_growth_statistics(tmp_path: Path):
     assert groups["treatment"]["mean_growth_rate_percent"] == 50
     assert groups["control"]["sample_size"] == 1
     assert "not evidence of causality" in comparison["interpretation_note"]
+
+
+def test_capture_profile_is_created_and_updated_per_tray(tmp_path: Path):
+    main.repository = Repository(tmp_path / "profile.db")
+    with TestClient(main.app) as client:
+        client.post(
+            "/api/v1/trays",
+            json={"code": "TRAY-P", "crop": "pepper", "rows": 2, "columns": 2},
+        )
+        first = client.put(
+            "/api/v1/trays/TRAY-P/capture-profile",
+            json={
+                "pixels_per_cm": 42.5,
+                "margin_ratio": 0.1,
+                "rectify": True,
+                "minimum_tray_area_ratio": 0.3,
+                "maximum_sensor_age_minutes": 20,
+                "updated_by": "student-team",
+                "updated_at": "2026-08-24T09:00:00+09:00",
+            },
+        )
+        second = client.put(
+            "/api/v1/trays/TRAY-P/capture-profile",
+            json={
+                **first.json(),
+                "pixels_per_cm": 43,
+                "updated_at": "2026-08-24T10:00:00+09:00",
+            },
+        )
+        profile = client.get("/api/v1/trays/TRAY-P/capture-profile")
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert profile.json()["pixels_per_cm"] == 43
+    assert profile.json()["rectify"] is True
+
+
+def test_tray_analysis_uses_stored_capture_profile(tmp_path: Path):
+    main.repository = Repository(tmp_path / "profile-analysis.db")
+    main.UPLOAD_ROOT = tmp_path / "uploads"
+    image = np.full((100, 100, 3), 80, dtype=np.uint8)
+    image[::10, :] = 120
+    image[:, ::10] = 120
+    image[20:80, 30:70] = (0, 180, 0)
+    success, encoded = cv2.imencode(".png", image)
+    assert success
+
+    with TestClient(main.app) as client:
+        client.post(
+            "/api/v1/trays",
+            json={"code": "TRAY-CP", "crop": "pepper", "rows": 1, "columns": 1},
+        )
+        client.put(
+            "/api/v1/trays/TRAY-CP/capture-profile",
+            json={
+                "pixels_per_cm": 10,
+                "margin_ratio": 0,
+                "rectify": False,
+                "minimum_tray_area_ratio": 0.25,
+                "maximum_sensor_age_minutes": 15,
+                "updated_by": "student-team",
+                "updated_at": "2026-08-24T10:00:00+09:00",
+            },
+        )
+        response = client.post(
+            "/api/v1/trays/TRAY-CP/images/analyze",
+            files={"image": ("tray.png", encoded.tobytes(), "image/png")},
+            data={"captured_at": "2026-08-24T11:00:00+09:00"},
+        )
+
+    assert response.status_code == 201, response.text
+    settings = response.json()["capture_settings"]
+    assert settings["source"] == "profile"
+    assert settings["pixels_per_cm"] == 10
+    assert settings["maximum_sensor_age_minutes"] == 15
