@@ -81,6 +81,34 @@ CREATE TABLE IF NOT EXISTS capture_sensor_links (
     time_delta_seconds REAL NOT NULL CHECK(time_delta_seconds >= 0),
     linked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS expert_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observation_id INTEGER NOT NULL REFERENCES observations(id),
+    reviewer TEXT NOT NULL,
+    assessment TEXT NOT NULL CHECK(assessment IN ('healthy', 'warning', 'abnormal', 'uncertain')),
+    observable_notes TEXT NOT NULL,
+    possible_cause_notes TEXT,
+    reviewed_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(observation_id, reviewer, reviewed_at)
+);
+CREATE INDEX IF NOT EXISTS expert_reviews_observation
+ON expert_reviews(observation_id, reviewed_at DESC);
+CREATE TABLE IF NOT EXISTS knowledge_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    observable_signals_json TEXT NOT NULL,
+    possible_causes_json TEXT NOT NULL,
+    required_checks_json TEXT NOT NULL,
+    suggested_actions_json TEXT NOT NULL,
+    safety_note TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('draft', 'approved', 'retired')) DEFAULT 'draft',
+    created_by TEXT NOT NULL,
+    approved_by TEXT,
+    approved_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK(status != 'approved' OR (approved_by IS NOT NULL AND approved_at IS NOT NULL))
+);
 """
 
 

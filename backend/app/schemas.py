@@ -5,7 +5,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .domain import HealthStatus
+from .domain import ExpertAssessment, HealthStatus, RuleStatus
 
 
 class TrayCreate(BaseModel):
@@ -163,3 +163,40 @@ class SensorReadingCreate(BaseModel):
 class SensorReadingRead(SensorReadingCreate):
     id: int
     tray_code: str
+
+
+class ExpertReviewCreate(BaseModel):
+    reviewer: str = Field(min_length=1, max_length=100)
+    assessment: ExpertAssessment
+    observable_notes: str = Field(min_length=1, max_length=2000)
+    possible_cause_notes: Optional[str] = Field(default=None, max_length=2000)
+    reviewed_at: datetime
+
+    @field_validator("reviewed_at")
+    @classmethod
+    def reviewed_at_requires_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("reviewed_at must include a timezone offset")
+        return value
+
+
+class ExpertReviewRead(ExpertReviewCreate):
+    id: int
+    observation_id: int
+
+
+class KnowledgeRuleCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    observable_signals: list[str] = Field(min_length=1)
+    possible_causes: list[str] = Field(min_length=1)
+    required_checks: list[str] = Field(min_length=1)
+    suggested_actions: list[str] = Field(min_length=1)
+    safety_note: str = Field(min_length=1, max_length=1000)
+    created_by: str = Field(min_length=1, max_length=100)
+
+
+class KnowledgeRuleRead(KnowledgeRuleCreate):
+    id: int
+    status: RuleStatus
+    approved_by: Optional[str]
+    approved_at: Optional[datetime]
