@@ -125,6 +125,7 @@ backend/tests/     dependency-free domain tests
 frontend/          static research dashboard
 docs/              architecture and research protocol
 hardware/          BOM, official datasheet manifest, and hardware baseline
+edge/              Raspberry Pi capture, offline queue, and upload agent
 ```
 
 ## Hardware references
@@ -132,6 +133,7 @@ hardware/          BOM, official datasheet manifest, and hardware baseline
 - [Hardware baseline](hardware/README.md)
 - [Official datasheet manifest](hardware/Datasheet_Manifest_v1.md)
 - [Editable BOM](hardware/Paichai_NEXUS_Smart_Seedling_AI_BOM_v1.1.xlsx)
+- [Raspberry Pi edge agent](edge/README.md)
 
 ## Next development milestone
 

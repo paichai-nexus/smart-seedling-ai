@@ -10,3 +10,4 @@ uploads/*
 !uploads/.gitkeep
 work/
 outputs/
+edge/data/
