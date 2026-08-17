@@ -75,6 +75,12 @@ CREATE TABLE IF NOT EXISTS sensor_readings (
 );
 CREATE INDEX IF NOT EXISTS sensor_readings_tray_time
 ON sensor_readings(tray_code, measured_at DESC);
+CREATE TABLE IF NOT EXISTS capture_sensor_links (
+    capture_id INTEGER PRIMARY KEY REFERENCES tray_captures(id),
+    sensor_reading_id INTEGER NOT NULL REFERENCES sensor_readings(id),
+    time_delta_seconds REAL NOT NULL CHECK(time_delta_seconds >= 0),
+    linked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
