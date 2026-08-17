@@ -174,8 +174,11 @@ def test_sensor_readings_are_validated_and_returned_latest_first(tmp_path: Path)
                     "measured_at": f"2026-08-20T{hour:02d}:00:00+09:00",
                     "source": "edge-01",
                     "temperature_c": temperature,
+                    "pressure_hpa": 1008.4,
                     "humidity_percent": 61,
                     "soil_moisture_percent": 43,
+                    "soil_moisture_raw_adc": 14520,
+                    "soil_moisture_voltage_v": 1.82,
                     "illuminance_lux": 12000,
                     "ec_ms_cm": 1.7,
                     "ph": 6.2,
@@ -187,6 +190,9 @@ def test_sensor_readings_are_validated_and_returned_latest_first(tmp_path: Path)
     assert empty.status_code == 422
     assert naive_time.status_code == 422
     assert [reading["temperature_c"] for reading in readings] == [25.1, 24.2]
+    assert readings[0]["pressure_hpa"] == 1008.4
+    assert readings[0]["soil_moisture_raw_adc"] == 14520
+    assert readings[0]["soil_moisture_voltage_v"] == 1.82
 
 
 def test_tray_capture_links_nearest_sensor_context(tmp_path: Path):
@@ -213,7 +219,10 @@ def test_tray_capture_links_nearest_sensor_context(tmp_path: Path):
                 "measured_at": "2026-08-20T09:08:00+09:00",
                 "source": "edge-01",
                 "temperature_c": 24.5,
+                "pressure_hpa": 1007.9,
                 "humidity_percent": 62,
+                "soil_moisture_raw_adc": 15001,
+                "soil_moisture_voltage_v": 1.88,
             },
         ).json()
         response = client.post(
@@ -230,6 +239,8 @@ def test_tray_capture_links_nearest_sensor_context(tmp_path: Path):
     assert context["reading_id"] == sensor["id"]
     assert context["time_delta_seconds"] == 120
     assert context["temperature_c"] == 24.5
+    assert context["pressure_hpa"] == 1007.9
+    assert context["soil_moisture_raw_adc"] == 15001
     with main.repository.connect() as connection:
         link = connection.execute("SELECT * FROM capture_sensor_links").fetchone()
     assert link["sensor_reading_id"] == sensor["id"]

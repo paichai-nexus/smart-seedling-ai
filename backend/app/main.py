@@ -334,8 +334,9 @@ async def analyze_tray_image(
             "SELECT * FROM capture_profiles WHERE tray_code = ?", (tray_code,)
         ).fetchone()
         sensor_rows = connection.execute(
-            """SELECT id, measured_at, source, temperature_c, humidity_percent,
-                      soil_moisture_percent, illuminance_lux, ec_ms_cm, ph
+            """SELECT id, measured_at, source, temperature_c, pressure_hpa,
+                      humidity_percent, soil_moisture_percent, soil_moisture_raw_adc,
+                      soil_moisture_voltage_v, illuminance_lux, ec_ms_cm, ph
                FROM sensor_readings WHERE tray_code = ?
                ORDER BY measured_at DESC LIMIT 5000""",
             (tray_code,),
@@ -478,8 +479,11 @@ async def analyze_tray_image(
                 source=matched_sensor["source"],
                 time_delta_seconds=sensor_match.time_delta_seconds,
                 temperature_c=matched_sensor["temperature_c"],
+                pressure_hpa=matched_sensor["pressure_hpa"],
                 humidity_percent=matched_sensor["humidity_percent"],
                 soil_moisture_percent=matched_sensor["soil_moisture_percent"],
+                soil_moisture_raw_adc=matched_sensor["soil_moisture_raw_adc"],
+                soil_moisture_voltage_v=matched_sensor["soil_moisture_voltage_v"],
                 illuminance_lux=matched_sensor["illuminance_lux"],
                 ec_ms_cm=matched_sensor["ec_ms_cm"],
                 ph=matched_sensor["ph"],
@@ -630,16 +634,20 @@ def create_sensor_reading(tray_code: str, payload: SensorReadingCreate) -> Senso
         try:
             cursor = connection.execute(
                 """INSERT INTO sensor_readings(
-                       tray_code, measured_at, source, temperature_c, humidity_percent,
-                       soil_moisture_percent, illuminance_lux, ec_ms_cm, ph
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       tray_code, measured_at, source, temperature_c, pressure_hpa,
+                       humidity_percent, soil_moisture_percent, soil_moisture_raw_adc,
+                       soil_moisture_voltage_v, illuminance_lux, ec_ms_cm, ph
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     tray_code,
                     payload.measured_at.isoformat(),
                     payload.source,
                     payload.temperature_c,
+                    payload.pressure_hpa,
                     payload.humidity_percent,
                     payload.soil_moisture_percent,
+                    payload.soil_moisture_raw_adc,
+                    payload.soil_moisture_voltage_v,
                     payload.illuminance_lux,
                     payload.ec_ms_cm,
                     payload.ph,
@@ -663,8 +671,9 @@ def list_sensor_readings(tray_code: str, limit: int = 100) -> list[SensorReading
         if tray is None:
             raise HTTPException(status_code=404, detail="Tray not found")
         rows = connection.execute(
-            """SELECT id, tray_code, measured_at, source, temperature_c,
-                      humidity_percent, soil_moisture_percent, illuminance_lux, ec_ms_cm, ph
+            """SELECT id, tray_code, measured_at, source, temperature_c, pressure_hpa,
+                      humidity_percent, soil_moisture_percent, soil_moisture_raw_adc,
+                      soil_moisture_voltage_v, illuminance_lux, ec_ms_cm, ph
                FROM sensor_readings WHERE tray_code = ?
                ORDER BY measured_at DESC LIMIT ?""",
             (tray_code, limit),
@@ -1026,8 +1035,11 @@ EXPERIMENT_EXPORT_FIELDS = [
     "damage_ratio",
     "ai_status",
     "temperature_c",
+    "pressure_hpa",
     "humidity_percent",
     "soil_moisture_percent",
+    "soil_moisture_raw_adc",
+    "soil_moisture_voltage_v",
     "illuminance_lux",
     "ec_ms_cm",
     "ph",
@@ -1043,8 +1055,10 @@ def export_experiment_csv(experiment_id: int) -> StreamingResponse:
            g.name AS group_name, g.kind AS group_kind, et.tray_code,
            o.seedling_id, o.captured_at, o.leaf_area_cm2, o.discoloration_ratio,
            o.damage_ratio, o.status AS ai_status,
-           sr.temperature_c, sr.humidity_percent, sr.soil_moisture_percent,
-           sr.illuminance_lux, sr.ec_ms_cm, sr.ph, csl.time_delta_seconds,
+           sr.temperature_c, sr.pressure_hpa, sr.humidity_percent,
+           sr.soil_moisture_percent, sr.soil_moisture_raw_adc,
+           sr.soil_moisture_voltage_v, sr.illuminance_lux, sr.ec_ms_cm, sr.ph,
+           csl.time_delta_seconds,
            er.assessment AS expert_assessment
     FROM experiments e
     JOIN experiment_groups g ON g.experiment_id = e.id
