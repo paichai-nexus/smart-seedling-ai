@@ -300,3 +300,53 @@ def test_knowledge_rule_is_hidden_until_expert_approval(tmp_path: Path):
     assert approval.status_code == 200, approval.text
     assert rules[0]["status"] == "approved"
     assert rules[0]["approved_by"] == "Professor Kim"
+
+
+def test_recommendations_use_only_approved_matching_rules(tmp_path: Path):
+    main.repository = Repository(tmp_path / "recommendations.db")
+    with TestClient(main.app) as client:
+        client.post(
+            "/api/v1/trays",
+            json={"code": "TRAY-K", "crop": "tomato", "rows": 1, "columns": 1},
+        )
+        observation = client.post(
+            "/api/v1/observations",
+            json={
+                "tray_code": "TRAY-K",
+                "row": 1,
+                "column": 1,
+                "captured_at": "2026-08-22T09:00:00+09:00",
+                "leaf_area_cm2": 10,
+                "discoloration_ratio": 0.12,
+            },
+        ).json()
+        rule_payload = {
+            "title": "Discoloration triage",
+            "observable_signals": ["discoloration"],
+            "possible_causes": ["nutrition", "moisture", "light"],
+            "required_checks": ["EC", "soil moisture", "illuminance"],
+            "suggested_actions": ["request expert review"],
+            "safety_note": "Do not alter inputs before measurement and expert review.",
+            "created_by": "student-team",
+        }
+        approved = client.post("/api/v1/knowledge-rules", json=rule_payload).json()
+        client.post(
+            f"/api/v1/knowledge-rules/{approved['id']}/approve",
+            json={
+                "approved_by": "Professor Kim",
+                "approved_at": "2026-08-22T10:00:00+09:00",
+            },
+        )
+        client.post(
+            "/api/v1/knowledge-rules",
+            json={**rule_payload, "title": "Unapproved rule"},
+        )
+        response = client.get(f"/api/v1/observations/{observation['id']}/recommendations")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["observed_signals"] == ["discoloration"]
+    assert len(body["rules"]) == 1
+    assert body["rules"][0]["rule_id"] == approved["id"]
+    assert body["rules"][0]["matched_signals"] == ["discoloration"]
+    assert "not a diagnosis" in body["disclaimer"]

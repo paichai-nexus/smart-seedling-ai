@@ -224,3 +224,22 @@ class ReviewQueueItem(BaseModel):
     damage_ratio: float
     confidence: float
     status: HealthStatus
+
+
+class RecommendationRuleRead(BaseModel):
+    rule_id: int
+    title: str
+    matched_signals: list[str]
+    match_score: float
+    possible_causes: list[str]
+    required_checks: list[str]
+    suggested_actions: list[str]
+    safety_note: str
+    approved_by: str
+
+
+class ObservationRecommendationRead(BaseModel):
+    observation_id: int
+    observed_signals: list[str]
+    rules: list[RecommendationRuleRead]
+    disclaimer: str

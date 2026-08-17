@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from typing_extensions import Annotated
 
 from .domain import ObservationMetrics, classify_status, growth_rate_percent, stable_seedling_id
+from .recommendations import derive_observable_signals, rank_knowledge_rules
 from .repository import Repository
 from .schemas import (
     CaptureQualityRead,
@@ -25,6 +26,8 @@ from .schemas import (
     KnowledgeRuleRead,
     ObservationCreate,
     ObservationRead,
+    ObservationRecommendationRead,
+    RecommendationRuleRead,
     ReviewQueueItem,
     SeedlingHistoryPoint,
     SeedlingLatest,
@@ -668,3 +671,70 @@ def list_knowledge_rules(include_drafts: bool = False) -> list[KnowledgeRuleRead
             f"SELECT * FROM knowledge_rules WHERE {where} ORDER BY id DESC"
         ).fetchall()
     return [knowledge_rule_from_row(row) for row in rows]
+
+
+@app.get(
+    "/api/v1/observations/{observation_id}/recommendations",
+    response_model=ObservationRecommendationRead,
+)
+def observation_recommendations(observation_id: int) -> ObservationRecommendationRead:
+    with repository.connect() as connection:
+        observation = connection.execute(
+            """SELECT id, seedling_id, captured_at, leaf_area_cm2, discoloration_ratio,
+                      damage_ratio, confidence
+               FROM observations WHERE id = ?""",
+            (observation_id,),
+        ).fetchone()
+        if observation is None:
+            raise HTTPException(status_code=404, detail="Observation not found")
+        previous = connection.execute(
+            """SELECT leaf_area_cm2 FROM observations
+               WHERE seedling_id = ? AND captured_at < ?
+               ORDER BY captured_at DESC LIMIT 1""",
+            (observation["seedling_id"], observation["captured_at"]),
+        ).fetchone()
+        rule_rows = connection.execute(
+            "SELECT * FROM knowledge_rules WHERE status = 'approved' ORDER BY id"
+        ).fetchall()
+
+    growth = (
+        growth_rate_percent(previous["leaf_area_cm2"], observation["leaf_area_cm2"])
+        if previous
+        else None
+    )
+    signals = derive_observable_signals(
+        discoloration_ratio=observation["discoloration_ratio"],
+        damage_ratio=observation["damage_ratio"],
+        confidence=observation["confidence"],
+        growth_rate_percent=growth,
+    )
+    candidates = rank_knowledge_rules(
+        signals,
+        [(row["id"], json.loads(row["observable_signals_json"])) for row in rule_rows],
+    )
+    rows_by_id = {row["id"]: row for row in rule_rows}
+    recommendations = []
+    for candidate in candidates:
+        row = rows_by_id[candidate.rule_id]
+        recommendations.append(
+            RecommendationRuleRead(
+                rule_id=row["id"],
+                title=row["title"],
+                matched_signals=list(candidate.matched_signals),
+                match_score=candidate.match_score,
+                possible_causes=json.loads(row["possible_causes_json"]),
+                required_checks=json.loads(row["required_checks_json"]),
+                suggested_actions=json.loads(row["suggested_actions_json"]),
+                safety_note=row["safety_note"],
+                approved_by=row["approved_by"],
+            )
+        )
+    return ObservationRecommendationRead(
+        observation_id=observation_id,
+        observed_signals=sorted(signals),
+        rules=recommendations,
+        disclaimer=(
+            "These are expert-approved decision-support rules, not a diagnosis. "
+            "Verify required checks before changing irrigation, fertilizer, or pesticide use."
+        ),
+    )

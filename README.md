@@ -74,6 +74,12 @@ Knowledge rules follow a draft-and-approve workflow: unapproved rules are hidden
 from the default recommendation query, and the schema intentionally contains no
 autonomous fertilizer or pesticide dosage field.
 
+`GET /api/v1/observations/{observation_id}/recommendations` translates measured
+ratios and growth change into auditable signals, currently `discoloration`,
+`damage`, `growth_decline`, `growth_slowdown`, and `low_confidence`. It ranks
+approved rules by signal coverage and returns possible causes, required checks,
+safe actions, approval provenance, and an explicit non-diagnostic disclaimer.
+
 Run tests:
 
 ```bash
