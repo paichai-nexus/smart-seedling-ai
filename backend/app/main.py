@@ -18,6 +18,8 @@ from .schemas import (
     ImageAnalysisRead,
     ObservationCreate,
     ObservationRead,
+    SeedlingHistoryPoint,
+    SeedlingLatest,
     TrayCreate,
 )
 from .vision import analyze_green_leaf_area, decode_image
@@ -205,3 +207,67 @@ def summary() -> DashboardSummary:
         expert_review=row["expert_review"] or 0,
         latest_capture_at=row["latest_capture_at"],
     )
+
+
+@app.get("/api/v1/seedlings", response_model=list[SeedlingLatest])
+def list_seedlings() -> list[SeedlingLatest]:
+    query = """
+    WITH latest AS (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY seedling_id ORDER BY captured_at DESC) AS rank
+      FROM observations
+    )
+    SELECT seedling_id, tray_code, cell_row, cell_column, captured_at, leaf_area_cm2, status
+    FROM latest WHERE rank = 1 ORDER BY tray_code, cell_row, cell_column
+    """
+    with repository.connect() as connection:
+        rows = connection.execute(query).fetchall()
+    return [
+        SeedlingLatest(
+            seedling_id=row["seedling_id"],
+            tray_code=row["tray_code"],
+            row=row["cell_row"],
+            column=row["cell_column"],
+            captured_at=row["captured_at"],
+            leaf_area_cm2=row["leaf_area_cm2"],
+            status=row["status"],
+        )
+        for row in rows
+    ]
+
+
+@app.get(
+    "/api/v1/seedlings/{seedling_id}/history",
+    response_model=list[SeedlingHistoryPoint],
+)
+def seedling_history(seedling_id: str, limit: int = 100) -> list[SeedlingHistoryPoint]:
+    if not 1 <= limit <= 500:
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
+    query = """
+    SELECT captured_at, leaf_area_cm2, discoloration_ratio, damage_ratio, status
+    FROM observations WHERE seedling_id = ? ORDER BY captured_at ASC LIMIT ?
+    """
+    with repository.connect() as connection:
+        rows = connection.execute(query, (seedling_id.upper(), limit)).fetchall()
+    if not rows:
+        raise HTTPException(status_code=404, detail="Seedling not found")
+
+    points = []
+    previous_area = None
+    for row in rows:
+        growth = (
+            growth_rate_percent(previous_area, row["leaf_area_cm2"])
+            if previous_area is not None
+            else None
+        )
+        points.append(
+            SeedlingHistoryPoint(
+                captured_at=row["captured_at"],
+                leaf_area_cm2=row["leaf_area_cm2"],
+                growth_rate_percent=growth,
+                discoloration_ratio=row["discoloration_ratio"],
+                damage_ratio=row["damage_ratio"],
+                status=row["status"],
+            )
+        )
+        previous_area = row["leaf_area_cm2"]
+    return points

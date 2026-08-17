@@ -53,3 +53,22 @@ class ImageAnalysisRead(BaseModel):
     coverage_ratio: float
     analysis_confidence: float
     status: HealthStatus
+
+
+class SeedlingLatest(BaseModel):
+    seedling_id: str
+    tray_code: str
+    row: int
+    column: int
+    captured_at: datetime
+    leaf_area_cm2: float
+    status: HealthStatus
+
+
+class SeedlingHistoryPoint(BaseModel):
+    captured_at: datetime
+    leaf_area_cm2: float
+    growth_rate_percent: Optional[float]
+    discoloration_ratio: float
+    damage_ratio: float
+    status: HealthStatus
