@@ -11,7 +11,7 @@ export function useMonitoring() {
   useEffect(() => {
     let active = true;
 
-    async function load() {
+    async function loadMonitoringData() {
       try {
         const snapshot = await getMonitoringSnapshot();
 
@@ -30,12 +30,16 @@ export function useMonitoring() {
       }
     }
 
-    load();
+    loadMonitoringData();
 
     return () => {
       active = false;
     };
   }, []);
 
-  return { data, loading, error };
+  return {
+    data,
+    loading,
+    error,
+  };
 }
