@@ -1,5 +1,5 @@
 import pytest
-from app.soil_calibration import relative_soil_moisture
+from app.smartfarm.soil import relative_soil_moisture
 
 
 def test_relative_soil_moisture_maps_dry_and_wet_references():

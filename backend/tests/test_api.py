@@ -4,7 +4,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from app import main
-from app.repository import Repository
+from app.infrastructure.repository import Repository
 from fastapi.testclient import TestClient
 
 

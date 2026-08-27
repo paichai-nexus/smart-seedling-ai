@@ -2,7 +2,7 @@ import unittest
 
 import cv2
 import numpy as np
-from app.vision import (
+from app.vision.service import (
     analyze_green_leaf_area,
     assess_capture_quality,
     decode_image,

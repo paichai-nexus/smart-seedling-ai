@@ -1,4 +1,4 @@
-from app.recommendations import derive_observable_signals, rank_knowledge_rules
+from app.expert.recommendations import derive_observable_signals, rank_knowledge_rules
 
 
 def test_measurements_become_non_diagnostic_observable_signals():

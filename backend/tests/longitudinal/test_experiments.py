@@ -1,4 +1,4 @@
-from app.experiments import summarize_group_growth
+from app.longitudinal.experiments import summarize_group_growth
 
 
 def test_group_growth_uses_first_and_last_observation_per_seedling():
