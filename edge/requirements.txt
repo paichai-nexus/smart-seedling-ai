@@ -1,1 +1,5 @@
 httpx>=0.27,<1
+Adafruit-Blinka
+adafruit-circuitpython-bme280
+adafruit-circuitpython-veml7700
+adafruit-circuitpython-ads1x15
