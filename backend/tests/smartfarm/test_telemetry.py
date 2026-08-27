@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from app.telemetry import nearest_sensor_reading
+from app.smartfarm.telemetry import nearest_sensor_reading
 
 
 def test_nearest_sensor_reading_compares_timezone_aware_instants():

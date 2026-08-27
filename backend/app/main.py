@@ -15,11 +15,11 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from typing_extensions import Annotated
 
-from .domain import ObservationMetrics, classify_status, growth_rate_percent, stable_seedling_id
-from .experiments import summarize_group_growth
-from .recommendations import derive_observable_signals, rank_knowledge_rules
-from .repository import Repository
-from .schemas import (
+from .core.domain import ObservationMetrics, classify_status, growth_rate_percent, stable_seedling_id
+from .longitudinal.experiments import summarize_group_growth
+from .expert.recommendations import derive_observable_signals, rank_knowledge_rules
+from .infrastructure.repository import Repository
+from .core.schemas import (
     CaptureProfileRead,
     CaptureProfileUpsert,
     CaptureQualityRead,
@@ -55,9 +55,9 @@ from .schemas import (
     TrayCreate,
     TrayRectificationRead,
 )
-from .soil_calibration import relative_soil_moisture
-from .telemetry import nearest_sensor_reading
-from .vision import (
+from .smartfarm.soil import relative_soil_moisture
+from .smartfarm.telemetry import nearest_sensor_reading
+from .vision.service import (
     analyze_green_leaf_area,
     assess_capture_quality,
     decode_image,

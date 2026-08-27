@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-from app.repository import Repository
+from app.infrastructure.repository import Repository
 
 
 def test_repository_migrates_existing_sensor_table(tmp_path: Path):
