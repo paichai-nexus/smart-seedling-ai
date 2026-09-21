@@ -1,5 +1,20 @@
 # 🌱 Smart Seedling AI
 
+<!-- NEXUS_PROJECT_META_START -->
+
+## Project Management
+
+| Field | Value |
+| --- | --- |
+| Status | 🟢 Active |
+| Project Lead | 김현규 |
+| Team / Support | 부팀장: 이금령 |
+| Next Milestone | 2026-09-22 원예산림학과 미팅 및 1차 실험 요구사항 정리 |
+| Registry | [NEXUS Project Registry](https://github.com/paichai-nexus/nexus-project-registry) |
+
+<!-- NEXUS_PROJECT_META_END -->
+
+
 **Vision AI × Longitudinal Data × IoT × ROS 2 × Robotics × Drone × Smart Agriculture**
 
 Smart Seedling AI is an interdisciplinary smart-agriculture research platform developed by **PAICHAI NEXUS**.
